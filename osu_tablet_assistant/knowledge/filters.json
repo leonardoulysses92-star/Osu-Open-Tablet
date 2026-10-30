@@ -1,0 +1,238 @@
+{
+  "version": 1,
+  "about": "Filter catalog keyed by OTD Path. Property names match OTD settings.json exactly. 'default' is the plugin's own default (from its source/README); 'min'/'max' are sensible osu! tuning bounds used to clamp recommendations (they may be narrower than what the plugin accepts). 'stage' is the OTD pipeline position (raw < pre < post). 'notes' are developer notes, never shown to the user (user text lives in locales/*/engine.json under summary_key / added_latency_note).",
+  "filters": [
+    {
+      "path": "OpenTabletDriver.Plugin.NoiseReduction",
+      "display_name": "Noise Reduction",
+      "plugin_name": "OpenTabletDriver (legacy built-in)",
+      "stage": "pre",
+      "advanced": false,
+      "best_for": ["noise", "chatter"],
+      "summary_key": "engine.filter.noise_reduction.summary",
+      "added_latency_note": "engine.filter.noise_reduction.latency",
+      "confidence": "low",
+      "sources": [
+        "https://github.com/hawku/TabletDriver/blob/master/TabletDriverService/TabletFilterNoiseReduction.cpp"
+      ],
+      "notes": "Path and property names verified in a real OTD 0.6 settings.json. No public source for this exact class was found; behaviour is assumed to follow hawku's noise reduction filter (geometric median of the last N samples, output snaps to the pen once it moves farther than the distance threshold). Defaults are guesses based on hawku's GUI. Latency: only while moving less than DistanceThreshold; fast movement resets the buffer.",
+      "params": [
+        {"name": "Samples", "kind": "int", "default": 10, "min": 2, "max": 20, "step": 1, "unit": ""},
+        {"name": "DistanceThreshold", "kind": "float", "default": 0.5, "min": 0.05, "max": 2.0, "step": 0.05, "unit": "mm"}
+      ]
+    },
+    {
+      "path": "TabletDriverFilters.Hawku.Smoothing",
+      "display_name": "Hawku Smoothing",
+      "plugin_name": "HawkuFilters",
+      "stage": "pre",
+      "advanced": false,
+      "best_for": ["smoothing"],
+      "summary_key": "engine.filter.hawku_smoothing.summary",
+      "added_latency_note": "engine.filter.hawku_smoothing.latency",
+      "confidence": "high",
+      "sources": [
+        "https://github.com/OpenTabletDriver/TabletDriverFilters/blob/master/HawkuFilters/Smoothing.cs",
+        "https://github.com/OpenTabletDriver/OpenTabletDriver/blob/v0.6.4.0/OpenTabletDriver.Plugin/Output/AsyncPositionedPipelineElement.cs"
+      ],
+      "notes": "Exponential smoothing: weight = 1 - 0.37^(1/(Latency/(1000/Frequency))), so the output covers 63% of a step after Latency ms (time constant = Latency). Plugin slider is 0..1000 ms, default 2; its tooltip says below 4 ms you should rather disable it and that ~50 ms is the max for osu!. Frequency (default 1000 Hz) is the filter's own async timer rate inherited from AsyncPositionedPipelineElement, NOT the tablet report rate: this project leaves it at the default.",
+      "params": [
+        {"name": "Latency", "kind": "float", "default": 2.0, "min": 0.0, "max": 50.0, "step": 0.5, "unit": "ms"},
+        {"name": "Frequency", "kind": "float", "default": 1000.0, "min": 30.0, "max": 2000.0, "step": 1.0, "unit": "Hz"}
+      ]
+    },
+    {
+      "path": "TabletDriverFilters.Devocub.Antichatter",
+      "display_name": "Devocub Antichatter",
+      "plugin_name": "HawkuFilters",
+      "stage": "pre",
+      "advanced": false,
+      "best_for": ["chatter", "smoothing", "prediction"],
+      "summary_key": "engine.filter.devocub_antichatter.summary",
+      "added_latency_note": "engine.filter.devocub_antichatter.latency",
+      "confidence": "high",
+      "sources": [
+        "https://github.com/OpenTabletDriver/TabletDriverFilters/blob/master/DevocubFilters/AntiChatter.cs",
+        "https://github.com/OpenTabletDriver/OpenTabletDriver/blob/v0.6.4.0/OpenTabletDriver.Plugin/Output/AsyncPositionedPipelineElement.cs"
+      ],
+      "notes": "Base weight reaches 90% of a step within Latency ms (time constant ~ Latency/ln 10). Antichatter divides the weight by y(x) = (x + OffsetX)^(-Strength) * Multiplier + OffsetY where x is distance to the target in mm: slow/small moves get much more smoothing, fast moves fall back to the base weight. Tooltip ranges: Strength 1..10, Multiplier 1..1000, OffsetX -1..2, OffsetY -1..10; presets 'Simple' 5-50 ms / Strength 2-3, 'Smooth' ~10 ms / Strength 3 / Multiplier 100. Prediction (cosh curve) wants >= 10-15 ms of latency. Helps tablets without hardware smoothing. Frequency (default 1000 Hz) is the filter's own async timer rate (AsyncPositionedPipelineElement), NOT the tablet report rate; the tooltip says not to change it, so this project leaves it at the default.",
+      "params": [
+        {"name": "Latency", "kind": "float", "default": 2.0, "min": 0.0, "max": 50.0, "step": 0.5, "unit": "ms"},
+        {"name": "AntichatterStrength", "kind": "float", "default": 3.0, "min": 1.0, "max": 10.0, "step": 0.1, "unit": ""},
+        {"name": "AntichatterMultiplier", "kind": "float", "default": 1.0, "min": 1.0, "max": 1000.0, "step": 1.0, "unit": ""},
+        {"name": "AntichatterOffsetX", "kind": "float", "default": 0.0, "min": -1.0, "max": 2.0, "step": 0.1, "unit": ""},
+        {"name": "AntichatterOffsetY", "kind": "float", "default": 1.0, "min": -1.0, "max": 10.0, "step": 0.1, "unit": ""},
+        {"name": "PredictionEnabled", "kind": "bool", "default": false, "min": null, "max": null, "step": null, "unit": ""},
+        {"name": "PredictionStrength", "kind": "float", "default": 1.1, "min": 0.0, "max": 5.0, "step": 0.1, "unit": ""},
+        {"name": "PredictionSharpness", "kind": "float", "default": 1.0, "min": 0.1, "max": 5.0, "step": 0.1, "unit": ""},
+        {"name": "PredictionOffsetX", "kind": "float", "default": 3.0, "min": -5.0, "max": 10.0, "step": 0.1, "unit": ""},
+        {"name": "PredictionOffsetY", "kind": "float", "default": 0.3, "min": -1.0, "max": 5.0, "step": 0.1, "unit": ""},
+        {"name": "Frequency", "kind": "float", "default": 1000.0, "min": 30.0, "max": 2000.0, "step": 1.0, "unit": "Hz"}
+      ]
+    },
+    {
+      "path": "TemporalResampler",
+      "display_name": "Temporal Resampler",
+      "plugin_name": "Temporal Resampler",
+      "stage": "raw",
+      "advanced": false,
+      "best_for": ["resampling", "prediction", "smoothing"],
+      "summary_key": "engine.filter.temporal_resampler.summary",
+      "added_latency_note": "engine.filter.temporal_resampler.latency",
+      "confidence": "high",
+      "sources": [
+        "https://github.com/shmkle/TemporalResampler/blob/main/README.md",
+        "https://github.com/shmkle/TemporalResampler/blob/main/TemporalResampler/TemporalResampler.cs"
+      ],
+      "notes": "Runs at PipelinePosition.Raw. Interpolates between reports (Kalman) so a low-rate tablet (e.g. 133 rps) looks fluid on a high-refresh monitor (README example: 240 Hz). frameShift ('Prediction Ratio') 0 = one report interval of latency, 0.5 = half, 1 = none (works best with some smoothing). latency = Hawku-like EMA in ms. followRadius in mm. reverseSmoothing < 1 undoes hardware smoothing and must be tuned per tablet (Reconstructor guide), so it is left at 1. extraFrames ('Maximize Frequency') default true. The report interval is measured from real report timestamps; Frequency is only used in the stats logger, so this project leaves it at the default.",
+      "params": [
+        {"name": "frameShift", "kind": "float", "default": 0.5, "min": 0.0, "max": 1.0, "step": 0.05, "unit": ""},
+        {"name": "followRadius", "kind": "float", "default": 0.0, "min": 0.0, "max": 2.0, "step": 0.01, "unit": "mm"},
+        {"name": "latency", "kind": "float", "default": 0.0, "min": 0.0, "max": 50.0, "step": 0.5, "unit": "ms"},
+        {"name": "reverseSmoothing", "kind": "float", "default": 1.0, "min": 0.001, "max": 1.0, "step": 0.001, "unit": ""},
+        {"name": "extraFrames", "kind": "bool", "default": true, "min": null, "max": null, "step": null, "unit": ""},
+        {"name": "loggingEnabled", "kind": "bool", "default": false, "min": null, "max": null, "step": null, "unit": ""},
+        {"name": "Frequency", "kind": "float", "default": 1000.0, "min": 30.0, "max": 2000.0, "step": 1.0, "unit": "Hz"}
+      ]
+    },
+    {
+      "path": "RadialFollow.RadialFollowSmoothingTabletSpace",
+      "display_name": "Radial Follow (tablet space)",
+      "plugin_name": "AbstractQbit's Radial Follow Smoothing",
+      "stage": "pre",
+      "advanced": false,
+      "best_for": ["smoothing", "chatter"],
+      "summary_key": "engine.filter.radial_follow.summary",
+      "added_latency_note": "engine.filter.radial_follow.latency",
+      "confidence": "high",
+      "sources": [
+        "https://github.com/AbstractQbit/AbstractOTDPlugins/blob/0.3.0/RadialFollow/README.md"
+      ],
+      "notes": "Cursor may lag behind the pen by at most OuterRadius (mm here); InnerRadius is a deadzone; SmoothingCoefficient 0.0001..1 (higher = slower descent = more smoothing), default 0.95; SoftKneeScale 0..100 default 1 (roughly logarithmic); SmoothingLeakCoefficient 0..1 default 0. Defaults: OuterRadius 1.0 mm, InnerRadius 0. Fast jumps are not delayed beyond the outer radius, which is why it is popular for osu!. InnerRadius must not exceed OuterRadius.",
+      "params": [
+        {"name": "OuterRadius", "kind": "float", "default": 1.0, "min": 0.0, "max": 5.0, "step": 0.05, "unit": "mm"},
+        {"name": "InnerRadius", "kind": "float", "default": 0.0, "min": 0.0, "max": 2.0, "step": 0.01, "unit": "mm"},
+        {"name": "SmoothingCoefficient", "kind": "float", "default": 0.95, "min": 0.0001, "max": 1.0, "step": 0.01, "unit": ""},
+        {"name": "SoftKneeScale", "kind": "float", "default": 1.0, "min": 0.0, "max": 100.0, "step": 0.1, "unit": ""},
+        {"name": "SmoothingLeakCoefficient", "kind": "float", "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01, "unit": ""}
+      ]
+    },
+    {
+      "path": "RadialFollow.RadialFollowSmoothingScreenSpace",
+      "display_name": "Radial Follow (screen space)",
+      "plugin_name": "AbstractQbit's Radial Follow Smoothing",
+      "stage": "post",
+      "advanced": false,
+      "best_for": ["smoothing", "chatter"],
+      "summary_key": "engine.filter.radial_follow.summary",
+      "added_latency_note": "engine.filter.radial_follow.latency",
+      "confidence": "high",
+      "sources": [
+        "https://github.com/AbstractQbit/AbstractOTDPlugins/blob/0.3.0/RadialFollow/README.md"
+      ],
+      "notes": "Same algorithm as the tablet-space variant but radii are in screen pixels (defaults OuterRadius 5 px, InnerRadius 0 px).",
+      "params": [
+        {"name": "OuterRadius", "kind": "float", "default": 5.0, "min": 0.0, "max": 50.0, "step": 0.5, "unit": "px"},
+        {"name": "InnerRadius", "kind": "float", "default": 0.0, "min": 0.0, "max": 20.0, "step": 0.1, "unit": "px"},
+        {"name": "SmoothingCoefficient", "kind": "float", "default": 0.95, "min": 0.0001, "max": 1.0, "step": 0.01, "unit": ""},
+        {"name": "SoftKneeScale", "kind": "float", "default": 1.0, "min": 0.0, "max": 100.0, "step": 0.1, "unit": ""},
+        {"name": "SmoothingLeakCoefficient", "kind": "float", "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.01, "unit": ""}
+      ]
+    },
+    {
+      "path": "Saturn.Multifilter",
+      "display_name": "Saturn Multifilter",
+      "plugin_name": "The Saturn Collection",
+      "stage": "pre",
+      "advanced": true,
+      "best_for": ["chatter", "prediction", "resampling"],
+      "summary_key": "engine.filter.saturn_multifilter.summary",
+      "added_latency_note": "engine.filter.saturn_multifilter.latency",
+      "confidence": "medium",
+      "sources": [
+        "https://github.com/shreddism/TheSaturnCollection/blob/main/README.md",
+        "https://github.com/shreddism/TheSaturnCollection/blob/main/TheSaturnCollection/Multifilter.cs",
+        "https://github.com/shreddism/TheSaturnCollection/blob/main/TheSaturnCollection/MultifilterCore.cs"
+      ],
+      "notes": "Antichatter (EMA + deadzone + distance smoothing that recovers to raw on substantial movement), Kalman prediction (frameShift) and optional interpolation (interp/wireMode). Author claims virtually zero extra latency. rInner/smoothDist are in raw tablet units (tablet-dependent). Defaults from main-branch source; the installed 1.0.0 may differ (dacOuter/msOverride have no attribute default, so 0). Frequency is used as the expected report interval (expect = 1000/Frequency), so it must equal the report rate (the only filter for which this project sets Frequency). Many tooltip-only options: advanced users only.",
+      "params": [
+        {"name": "reverseSmoothing", "kind": "float", "default": 1.0, "min": 0.001, "max": 1.0, "step": 0.001, "unit": ""},
+        {"name": "stockWeight", "kind": "float", "default": 1.0, "min": 0.001, "max": 1.0, "step": 0.01, "unit": ""},
+        {"name": "rInner", "kind": "float", "default": 25.0, "min": 0.0, "max": 200.0, "step": 1.0, "unit": "raw"},
+        {"name": "smoothDist", "kind": "float", "default": 50.0, "min": 0.0, "max": 300.0, "step": 1.0, "unit": "raw"},
+        {"name": "sepMult", "kind": "float", "default": 1.0, "min": 0.5, "max": 10.0, "step": 0.1, "unit": ""},
+        {"name": "aResponse", "kind": "float", "default": 0.0, "min": 0.0, "max": 10.0, "step": 0.1, "unit": ""},
+        {"name": "dacOuter", "kind": "float", "default": 0.0, "min": 0.0, "max": 100.0, "step": 0.5, "unit": ""},
+        {"name": "areaScale", "kind": "float", "default": 0.5, "min": 0.01, "max": 5.0, "step": 0.01, "unit": ""},
+        {"name": "xMod", "kind": "float", "default": 1.0, "min": 0.01, "max": 100.0, "step": 0.01, "unit": ""},
+        {"name": "interp", "kind": "bool", "default": false, "min": null, "max": null, "step": null, "unit": ""},
+        {"name": "wireMode", "kind": "enum", "default": "Wire - Interp", "min": null, "max": null, "step": null, "unit": "",
+         "choices": ["Non-Wire - Point", "Non-Wire - Interp", "Wire - Point", "Wire - Interp"]},
+        {"name": "frameShift", "kind": "float", "default": 0.0, "min": 0.0, "max": 1.0, "step": 0.05, "unit": ""},
+        {"name": "msOverride", "kind": "float", "default": 0.0, "min": 0.0, "max": 20.0, "step": 0.1, "unit": "ms"},
+        {"name": "ExGate", "kind": "bool", "default": false, "min": null, "max": null, "step": null, "unit": ""},
+        {"name": "Frequency", "kind": "float", "default": 1000.0, "min": 30.0, "max": 2000.0, "step": 1.0, "unit": "Hz"}
+      ]
+    },
+    {
+      "path": "Saturn.AreaRoundingDFC",
+      "display_name": "Saturn Area Rounding",
+      "plugin_name": "The Saturn Collection",
+      "stage": "post",
+      "advanced": true,
+      "best_for": ["area_shaping"],
+      "summary_key": "engine.filter.saturn_area_rounding.summary",
+      "added_latency_note": "engine.filter.saturn_area_rounding.latency",
+      "confidence": "medium",
+      "sources": [
+        "https://github.com/shreddism/TheSaturnCollection/blob/main/README.md",
+        "https://github.com/shreddism/TheSaturnCollection/blob/main/TheSaturnCollection/AreaRoundingDFC.cs"
+      ],
+      "notes": "Post-transform reshaping by distance from the display center (not a smoothing filter, adds no latency). threshold = radius where output equals input (screen px); dPower > 1 expands, < 1 shrinks; useful range ~0.5..2. Never recommended automatically; listed so existing profiles can be understood.",
+      "params": [
+        {"name": "threshold", "kind": "float", "default": 720.0, "min": 0.0, "max": 5000.0, "step": 1.0, "unit": "px"},
+        {"name": "dPower", "kind": "float", "default": 1.0, "min": 0.5, "max": 2.0, "step": 0.01, "unit": ""},
+        {"name": "xDiv", "kind": "float", "default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01, "unit": ""},
+        {"name": "yDiv", "kind": "float", "default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01, "unit": ""},
+        {"name": "xMul", "kind": "float", "default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01, "unit": ""},
+        {"name": "yMul", "kind": "float", "default": 1.0, "min": 0.0, "max": 10.0, "step": 0.01, "unit": ""}
+      ]
+    },
+    {
+      "path": "Kuuube_s_Chatter_Exterminator.Kuuube_s_CHATTER_EXTERMINATOR_RAW",
+      "display_name": "Kuuube's Chatter Exterminator (raw)",
+      "plugin_name": "Kuuube's CHATTER EXTERMINATOR",
+      "stage": "post",
+      "advanced": false,
+      "best_for": ["chatter"],
+      "summary_key": "engine.filter.chatter_exterminator_raw.summary",
+      "added_latency_note": "engine.filter.chatter_exterminator.latency",
+      "confidence": "low",
+      "sources": [
+        "https://github.com/Kuuuube/Kuuube-s-CHATTER-EXTERMINATOR/blob/main/README.md"
+      ],
+      "notes": "README: basic low-latency antichatter on screen coordinates; any strength > 0; recommended 2-3 dragging, 5-6 hovering. No default documented: 2 assumed (low end). Algorithm and real latency not documented.",
+      "params": [
+        {"name": "Chatter_Extermination_Strength", "kind": "float", "default": 2.0, "min": 0.1, "max": 30.0, "step": 0.1, "unit": ""}
+      ]
+    },
+    {
+      "path": "Kuuube_s_Chatter_Exterminator.Kuuube_s_CHATTER_EXTERMINATOR_SMOOTH",
+      "display_name": "Kuuube's Chatter Exterminator (smooth)",
+      "plugin_name": "Kuuube's CHATTER EXTERMINATOR",
+      "stage": "pre",
+      "advanced": false,
+      "best_for": ["chatter", "noise"],
+      "summary_key": "engine.filter.chatter_exterminator_smooth.summary",
+      "added_latency_note": "engine.filter.chatter_exterminator.latency",
+      "confidence": "low",
+      "sources": [
+        "https://github.com/Kuuuube/Kuuube-s-CHATTER-EXTERMINATOR/blob/main/README.md"
+      ],
+      "notes": "README: same antichatter on tablet coordinates, also evens out input when monitor and tablet aspect ratios differ; recommended 6-7 dragging, 15-16 hovering. No default documented: 6 assumed (low end).",
+      "params": [
+        {"name": "Chatter_Extermination_Strength", "kind": "float", "default": 6.0, "min": 0.1, "max": 30.0, "step": 0.1, "unit": ""}
+      ]
+    }
+  ]
+}

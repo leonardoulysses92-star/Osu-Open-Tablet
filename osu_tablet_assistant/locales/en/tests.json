@@ -1,0 +1,18 @@
+{
+  "tests.common.start_hint": "Click (or tap with the pen) to start",
+  "tests.common.cancel_hint": "Press ESC to cancel",
+  "tests.common.countdown": "Starting in {n}",
+  "tests.common.progress": "{done} / {total}",
+  "tests.rate.title": "Report rate test",
+  "tests.rate.instructions": "Draw large, continuous circles with the pen for about 5 seconds at your normal playing speed. This measures how many positions per second the cursor receives.",
+  "tests.rate.running": "Keep drawing circles",
+  "tests.stillness.title": "Stability test",
+  "tests.stillness.instructions": "Rest the pen tip on the tablet and do not move it for about 5 seconds. You can also hold it in the air, very close to the surface (hover), without moving it. This measures how much the cursor shakes.",
+  "tests.stillness.running": "Hold the pen still",
+  "tests.tracking.title": "Tracking test",
+  "tests.tracking.instructions": "A pink dot will move in a figure eight at constant speed for about 8 seconds. Follow the dot with your cursor as closely as you can. This measures delay, error and smoothness.",
+  "tests.tracking.running": "Follow the dot",
+  "tests.aim.title": "Aim test",
+  "tests.aim.instructions": "20 circles will appear one at a time. Click the center of each one (pen tip is left click) quickly and accurately.",
+  "tests.aim.running": "Click the circle"
+}

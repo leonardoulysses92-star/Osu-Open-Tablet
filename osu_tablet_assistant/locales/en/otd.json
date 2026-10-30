@@ -1,0 +1,14 @@
+{
+  "otd.apply.ok_console": "The new settings are active in OpenTabletDriver (applied with OpenTabletDriver.Console).",
+  "otd.apply.ok_rpc": "The new settings are active in OpenTabletDriver (sent directly to the daemon).",
+  "otd.apply.manual_preset": "The settings could not be applied automatically. They were saved as a preset: in OpenTabletDriver open File > Presets and select the preset named in the details, then click Apply.",
+  "otd.apply.daemon_not_running": "OpenTabletDriver is not running. The settings were saved as a preset: start OpenTabletDriver, open File > Presets and select the preset named in the details.",
+  "otd.apply.failed": "The settings could not be applied or saved as a preset. See the details.",
+  "otd.error.settings_missing": "OpenTabletDriver settings file not found: {path}",
+  "otd.error.settings_unreadable": "Could not read the OpenTabletDriver settings file {path}: {detail}",
+  "otd.error.settings_invalid_json": "The OpenTabletDriver settings file {path} is damaged (invalid JSON): {detail}",
+  "otd.error.settings_not_object": "The OpenTabletDriver settings file {path} does not have the expected format.",
+  "otd.error.config_dir_missing": "OpenTabletDriver configuration folder not found: {path}",
+  "otd.error.preset_name_invalid": "\"{name}\" cannot be used as a preset name. Avoid the characters < > : \" / \\ | ? * and a trailing dot.",
+  "otd.error.preset_exists": "A preset with that name already exists: {path}"
+}

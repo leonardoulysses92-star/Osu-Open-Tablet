@@ -1,0 +1,18 @@
+{
+  "tests.common.start_hint": "Haz clic (o toca con el lápiz) para empezar",
+  "tests.common.cancel_hint": "ESC para cancelar",
+  "tests.common.countdown": "Empieza en {n}",
+  "tests.common.progress": "{done} / {total}",
+  "tests.rate.title": "Prueba de frecuencia",
+  "tests.rate.instructions": "Dibuja círculos grandes y continuos con el lápiz durante unos 5 segundos, a velocidad normal de juego. Mide cuántas posiciones por segundo recibe el cursor.",
+  "tests.rate.running": "Dibuja círculos sin parar",
+  "tests.stillness.title": "Prueba de estabilidad",
+  "tests.stillness.instructions": "Apoya la punta del lápiz sobre la tableta y no lo muevas durante unos 5 segundos. También puedes mantenerlo en el aire, muy cerca de la superficie (hover), sin moverlo. Mide cuánto tiembla el cursor.",
+  "tests.stillness.running": "Mantén el lápiz quieto",
+  "tests.tracking.title": "Prueba de seguimiento",
+  "tests.tracking.instructions": "Un punto rosa se moverá dibujando un ocho a velocidad constante durante unos 8 segundos. Sigue el punto con el cursor lo mejor que puedas. Mide el retraso, el error y la suavidad.",
+  "tests.tracking.running": "Sigue el punto",
+  "tests.aim.title": "Prueba de puntería",
+  "tests.aim.instructions": "Irán apareciendo 20 círculos, de uno en uno. Haz clic en el centro de cada uno (la punta del lápiz es el clic izquierdo) con rapidez y precisión.",
+  "tests.aim.running": "Haz clic en el círculo"
+}

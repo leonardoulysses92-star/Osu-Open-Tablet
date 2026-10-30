@@ -1,0 +1,485 @@
+{
+ "schema": 1,
+ "tablets": [
+  {
+   "name": "Wacom CTL-471",
+   "width_mm": 152,
+   "height_mm": 95,
+   "max_report_rate_hz": 133,
+   "max_pressure": 1023,
+   "resolution_lpmm": 100.0,
+   "verified": true,
+   "rate_estimated": false
+  },
+  {
+   "name": "Wacom CTL-472",
+   "width_mm": 152,
+   "height_mm": 95,
+   "max_report_rate_hz": 133,
+   "max_pressure": 2047,
+   "resolution_lpmm": 100.0,
+   "verified": true,
+   "rate_estimated": false
+  },
+  {
+   "name": "Wacom CTL-671",
+   "width_mm": 216,
+   "height_mm": 135,
+   "max_report_rate_hz": 133,
+   "max_pressure": 1023,
+   "resolution_lpmm": 100.0,
+   "verified": true,
+   "rate_estimated": false
+  },
+  {
+   "name": "Wacom CTL-672",
+   "width_mm": 216,
+   "height_mm": 135,
+   "max_report_rate_hz": 133,
+   "max_pressure": 2047,
+   "resolution_lpmm": 100.0,
+   "verified": true,
+   "rate_estimated": false
+  },
+  {
+   "name": "Wacom CTH-480",
+   "width_mm": 152,
+   "height_mm": 95,
+   "max_report_rate_hz": 133,
+   "max_pressure": 1023,
+   "resolution_lpmm": 100.0,
+   "verified": true,
+   "rate_estimated": false
+  },
+  {
+   "name": "Wacom CTH-680",
+   "width_mm": 216,
+   "height_mm": 135,
+   "max_report_rate_hz": 133,
+   "max_pressure": 1023,
+   "resolution_lpmm": 100.0,
+   "verified": true,
+   "rate_estimated": false
+  },
+  {
+   "name": "Wacom CTL-480",
+   "width_mm": 152,
+   "height_mm": 95,
+   "max_report_rate_hz": 133,
+   "max_pressure": 1023,
+   "resolution_lpmm": 100.0,
+   "verified": true,
+   "rate_estimated": false
+  },
+  {
+   "name": "Wacom CTL-680",
+   "width_mm": 216,
+   "height_mm": 135,
+   "max_report_rate_hz": 133,
+   "max_pressure": 1023,
+   "resolution_lpmm": 100.0,
+   "verified": true,
+   "rate_estimated": false
+  },
+  {
+   "name": "Wacom CTL-490",
+   "width_mm": 152,
+   "height_mm": 95,
+   "max_report_rate_hz": 133,
+   "max_pressure": 2047,
+   "resolution_lpmm": 100.0,
+   "verified": true,
+   "rate_estimated": false
+  },
+  {
+   "name": "Wacom CTL-690",
+   "width_mm": 216,
+   "height_mm": 135,
+   "max_report_rate_hz": 133,
+   "max_pressure": 2047,
+   "resolution_lpmm": 100.0,
+   "verified": true,
+   "rate_estimated": false
+  },
+  {
+   "name": "Wacom CTL-470",
+   "width_mm": 147.2,
+   "height_mm": 92,
+   "max_report_rate_hz": 133,
+   "max_pressure": 1023,
+   "resolution_lpmm": 100.0,
+   "verified": true,
+   "rate_estimated": false
+  },
+  {
+   "name": "Wacom CTH-460",
+   "width_mm": 147.2,
+   "height_mm": 92,
+   "max_report_rate_hz": 133,
+   "max_pressure": 1023,
+   "resolution_lpmm": 100.0,
+   "verified": true,
+   "rate_estimated": false
+  },
+  {
+   "name": "Wacom CTL-4100",
+   "width_mm": 152,
+   "height_mm": 95,
+   "max_report_rate_hz": 133,
+   "max_pressure": 4095,
+   "resolution_lpmm": 100.0,
+   "verified": true,
+   "rate_estimated": true
+  },
+  {
+   "name": "Wacom CTL-6100",
+   "width_mm": 216,
+   "height_mm": 135,
+   "max_report_rate_hz": 133,
+   "max_pressure": 4095,
+   "resolution_lpmm": 100.0,
+   "verified": true,
+   "rate_estimated": true
+  },
+  {
+   "name": "Wacom PTH-451",
+   "width_mm": 157.48,
+   "height_mm": 98.425,
+   "max_report_rate_hz": 200,
+   "max_pressure": 2047,
+   "resolution_lpmm": 200.0,
+   "verified": true,
+   "rate_estimated": false
+  },
+  {
+   "name": "Wacom PTH-660",
+   "width_mm": 224,
+   "height_mm": 148,
+   "max_report_rate_hz": 200,
+   "max_pressure": 8191,
+   "resolution_lpmm": 200.0,
+   "verified": true,
+   "rate_estimated": false
+  },
+  {
+   "name": "Wacom PTH-860",
+   "width_mm": 311,
+   "height_mm": 216,
+   "max_report_rate_hz": 200,
+   "max_pressure": 8191,
+   "resolution_lpmm": 200.0,
+   "verified": true,
+   "rate_estimated": false
+  },
+  {
+   "name": "XP-Pen Star G430",
+   "width_mm": 101.6,
+   "height_mm": 76.2,
+   "max_report_rate_hz": 220,
+   "max_pressure": 2047,
+   "resolution_lpmm": 450.0,
+   "verified": true,
+   "rate_estimated": true
+  },
+  {
+   "name": "XP-Pen Star G430S",
+   "width_mm": 101.6,
+   "height_mm": 76.2,
+   "max_report_rate_hz": 266,
+   "max_pressure": 8191,
+   "resolution_lpmm": 200.0,
+   "verified": true,
+   "rate_estimated": true
+  },
+  {
+   "name": "XP-Pen Star G640",
+   "width_mm": 160,
+   "height_mm": 100,
+   "max_report_rate_hz": 266,
+   "max_pressure": 8191,
+   "resolution_lpmm": 200.0,
+   "verified": true,
+   "rate_estimated": false
+  },
+  {
+   "name": "XP-Pen Star G640S",
+   "width_mm": 165,
+   "height_mm": 103,
+   "max_report_rate_hz": 266,
+   "max_pressure": 8191,
+   "resolution_lpmm": 199.99,
+   "verified": true,
+   "rate_estimated": false
+  },
+  {
+   "name": "XP-Pen Star 03",
+   "width_mm": 254,
+   "height_mm": 152.4,
+   "max_report_rate_hz": 200,
+   "max_pressure": 8191,
+   "resolution_lpmm": 200.0,
+   "verified": true,
+   "rate_estimated": true
+  },
+  {
+   "name": "XP-Pen Star 06",
+   "width_mm": 254,
+   "height_mm": 152.4,
+   "max_report_rate_hz": 200,
+   "max_pressure": 8191,
+   "resolution_lpmm": 200.0,
+   "verified": true,
+   "rate_estimated": true
+  },
+  {
+   "name": "XP-Pen Deco 01",
+   "width_mm": 254,
+   "height_mm": 158.75,
+   "max_report_rate_hz": 200,
+   "max_pressure": 8191,
+   "resolution_lpmm": 100.0,
+   "verified": true,
+   "rate_estimated": true
+  },
+  {
+   "name": "XP-Pen Deco 01 V2",
+   "width_mm": 254,
+   "height_mm": 158.75,
+   "max_report_rate_hz": 266,
+   "max_pressure": 8191,
+   "resolution_lpmm": 100.0,
+   "verified": true,
+   "rate_estimated": true
+  },
+  {
+   "name": "XP-Pen Deco 02",
+   "width_mm": 254,
+   "height_mm": 142.875,
+   "max_report_rate_hz": 266,
+   "max_pressure": 8191,
+   "resolution_lpmm": 88.0,
+   "verified": true,
+   "rate_estimated": true
+  },
+  {
+   "name": "XP-Pen Deco 03",
+   "width_mm": 254,
+   "height_mm": 142.875,
+   "max_report_rate_hz": 266,
+   "max_pressure": 8191,
+   "resolution_lpmm": 200.0,
+   "verified": true,
+   "rate_estimated": true
+  },
+  {
+   "name": "XP-Pen Deco mini4",
+   "width_mm": 101.6,
+   "height_mm": 76.2,
+   "max_report_rate_hz": 266,
+   "max_pressure": 8191,
+   "resolution_lpmm": 200.0,
+   "verified": true,
+   "rate_estimated": true
+  },
+  {
+   "name": "XP-Pen Deco mini7",
+   "width_mm": 177.8,
+   "height_mm": 111.095,
+   "max_report_rate_hz": 266,
+   "max_pressure": 8191,
+   "resolution_lpmm": 200.0,
+   "verified": true,
+   "rate_estimated": true
+  },
+  {
+   "name": "XP-Pen Deco M",
+   "width_mm": 203.2,
+   "height_mm": 127,
+   "max_report_rate_hz": 266,
+   "max_pressure": 8191,
+   "resolution_lpmm": 200.0,
+   "verified": true,
+   "rate_estimated": true
+  },
+  {
+   "name": "Huion 420",
+   "width_mm": 101.6,
+   "height_mm": 57.01295,
+   "max_report_rate_hz": 200,
+   "max_pressure": 2047,
+   "resolution_lpmm": 82.09,
+   "verified": true,
+   "rate_estimated": true
+  },
+  {
+   "name": "Huion H420X",
+   "width_mm": 106,
+   "height_mm": 66,
+   "max_report_rate_hz": 233,
+   "max_pressure": 8191,
+   "resolution_lpmm": 200.0,
+   "verified": true,
+   "rate_estimated": true
+  },
+  {
+   "name": "Huion H430P",
+   "width_mm": 121.92,
+   "height_mm": 76.2,
+   "max_report_rate_hz": 233,
+   "max_pressure": 4095,
+   "resolution_lpmm": 200.0,
+   "verified": true,
+   "rate_estimated": false
+  },
+  {
+   "name": "Huion H640P",
+   "width_mm": 160,
+   "height_mm": 100,
+   "max_report_rate_hz": 233,
+   "max_pressure": 8191,
+   "resolution_lpmm": 200.0,
+   "verified": true,
+   "rate_estimated": false
+  },
+  {
+   "name": "Huion H950P",
+   "width_mm": 221,
+   "height_mm": 138,
+   "max_report_rate_hz": 233,
+   "max_pressure": 8191,
+   "resolution_lpmm": 200.0,
+   "verified": true,
+   "rate_estimated": false
+  },
+  {
+   "name": "Huion H580X",
+   "width_mm": 203.2,
+   "height_mm": 127,
+   "max_report_rate_hz": 233,
+   "max_pressure": 8191,
+   "resolution_lpmm": 200.0,
+   "verified": true,
+   "rate_estimated": true
+  },
+  {
+   "name": "Huion H610 Pro V2",
+   "width_mm": 254,
+   "height_mm": 158.75,
+   "max_report_rate_hz": 233,
+   "max_pressure": 8191,
+   "resolution_lpmm": 200.0,
+   "verified": true,
+   "rate_estimated": true
+  },
+  {
+   "name": "Huion HS64",
+   "width_mm": 160,
+   "height_mm": 102,
+   "max_report_rate_hz": 266,
+   "max_pressure": 8191,
+   "resolution_lpmm": 200.0,
+   "verified": true,
+   "rate_estimated": true
+  },
+  {
+   "name": "Huion HS611",
+   "width_mm": 258.4,
+   "height_mm": 161.5,
+   "max_report_rate_hz": 266,
+   "max_pressure": 8191,
+   "resolution_lpmm": 200.0,
+   "verified": true,
+   "rate_estimated": true
+  },
+  {
+   "name": "Huion Q11K V2",
+   "width_mm": 279.4,
+   "height_mm": 174.625,
+   "max_report_rate_hz": 233,
+   "max_pressure": 8191,
+   "resolution_lpmm": 200.0,
+   "verified": true,
+   "rate_estimated": true
+  },
+  {
+   "name": "Gaomon S620",
+   "width_mm": 165.1,
+   "height_mm": 101.6,
+   "max_report_rate_hz": 266,
+   "max_pressure": 8191,
+   "resolution_lpmm": 200.0,
+   "verified": true,
+   "rate_estimated": false
+  },
+  {
+   "name": "Gaomon M10K",
+   "width_mm": 254,
+   "height_mm": 158.75,
+   "max_report_rate_hz": 233,
+   "max_pressure": 8191,
+   "resolution_lpmm": 200.0,
+   "verified": true,
+   "rate_estimated": true
+  },
+  {
+   "name": "Gaomon M6",
+   "width_mm": 254,
+   "height_mm": 158.75,
+   "max_report_rate_hz": 233,
+   "max_pressure": 8191,
+   "resolution_lpmm": 200.0,
+   "verified": true,
+   "rate_estimated": true
+  },
+  {
+   "name": "Gaomon S56K",
+   "width_mm": 160,
+   "height_mm": 120,
+   "max_report_rate_hz": 200,
+   "max_pressure": 2047,
+   "resolution_lpmm": 200.0,
+   "verified": true,
+   "rate_estimated": true
+  },
+  {
+   "name": "VEIKK S640",
+   "width_mm": 152.4,
+   "height_mm": 101.6,
+   "max_report_rate_hz": 250,
+   "max_pressure": 8191,
+   "resolution_lpmm": 200.0,
+   "verified": true,
+   "rate_estimated": false
+  },
+  {
+   "name": "VEIKK S640 V2",
+   "width_mm": 152.4,
+   "height_mm": 101.6,
+   "max_report_rate_hz": 250,
+   "max_pressure": 8191,
+   "resolution_lpmm": 200.0,
+   "verified": true,
+   "rate_estimated": true
+  },
+  {
+   "name": "VEIKK A15",
+   "width_mm": 254,
+   "height_mm": 152.4,
+   "max_report_rate_hz": 250,
+   "max_pressure": 8191,
+   "resolution_lpmm": 200.0,
+   "verified": true,
+   "rate_estimated": true
+  },
+  {
+   "name": "VEIKK A30",
+   "width_mm": 254,
+   "height_mm": 152.4,
+   "max_report_rate_hz": 250,
+   "max_pressure": 8191,
+   "resolution_lpmm": 200.0,
+   "verified": true,
+   "rate_estimated": true
+  }
+ ]
+}

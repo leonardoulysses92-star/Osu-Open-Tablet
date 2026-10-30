@@ -140,6 +140,21 @@ def run_test(parent, kind: str, mm_per_px: float, display: DisplaySpec | None,
 # mm_per_px = tablet_area.width_mm / display.width_px (computed by the caller).
 ```
 
+Integration notes (verified when wiring the modules together):
+
+* `mm_per_px` uses the areas OTD applies *during* the test: the current profile's
+  tablet area and its own display area for a baseline, the candidate's for a candidate.
+* Coordinates: `DisplaySpec` (and the test window / `GetCursorPos`) use OS desktop
+  px with the primary monitor at 0,0. OTD measures its display area from the
+  top-left of the whole virtual desktop (a real 0.6.7 setup with a monitor left of
+  the primary stores the primary's center as X = 960 + 1080). `Session.otd_display()`
+  shifts the display by that origin before anything is written into OTD.
+* `Frequency` is left at the catalog default (1000 Hz) except for Saturn
+  Multifilter, the only filter that reads it as the tablet report rate.
+* A rotated current area (e.g. 180 deg, left-handed) keeps its rotation.
+* Per candidate the wizard runs `stillness`, `tracking` and `aim` while that
+  candidate is live in OTD (jitter is part of the score).
+
 **gui** (`osu_tablet_assistant.gui`, `knowledge.tablets`)
 
 ```python

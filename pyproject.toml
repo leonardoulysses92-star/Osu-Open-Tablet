@@ -8,6 +8,7 @@ version = "0.1.0"
 description = "Guided OpenTabletDriver setup assistant for osu! players: finds good area and filter settings for any tablet."
 readme = "README.md"
 requires-python = ">=3.10"
+license = { text = "MIT" }
 dependencies = []
 
 [project.scripts]
