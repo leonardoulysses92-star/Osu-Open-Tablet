@@ -11,3 +11,6 @@ dist/
 settings.json
 Presets/
 Backup/
+
+# graphify output (local analysis, not part of the program)
+graphify-out/

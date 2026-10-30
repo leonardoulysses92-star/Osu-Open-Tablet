@@ -8,12 +8,14 @@ import unittest
 from dataclasses import replace
 from pathlib import Path
 
+from osu_tablet_assistant.engine import community
 from osu_tablet_assistant.engine.area import recommend_area
 from osu_tablet_assistant.engine.recommend import generate_candidates, refine
 from osu_tablet_assistant.knowledge.filters import FilterParam, load_catalog, parse_catalog
+from osu_tablet_assistant.knowledge.presets import load_presets
 from osu_tablet_assistant.models import (CandidateResult, DisplaySpec, FilterConfig, MapPreference,
-                                         MetricsReport, PlayStyle, Priority, ProfileInfo, Rect,
-                                         SkillLevel, TabletSpec, UserPreferences)
+                                         MetricsReport, PlayStyle, PluginPolicy, Priority, ProfileInfo,
+                                         Rect, SkillLevel, TabletSpec, UserPreferences)
 
 LOCALES = Path(__file__).resolve().parent.parent / "osu_tablet_assistant" / "locales"
 
@@ -32,9 +34,12 @@ REQUIRED = {
     "RadialFollow.RadialFollowSmoothingScreenSpace": {
         "OuterRadius", "InnerRadius", "SmoothingCoefficient", "SoftKneeScale",
         "SmoothingLeakCoefficient"},
+    # dacOuter / msOverride were removed after Saturn 1.0.0 (audit 2026-10-30).
     "Saturn.Multifilter": {"reverseSmoothing", "stockWeight", "rInner", "smoothDist", "sepMult",
-                           "aResponse", "dacOuter", "areaScale", "xMod", "interp", "wireMode",
-                           "frameShift", "msOverride", "ExGate", "Frequency"},
+                           "aResponse", "areaScale", "xMod", "interp", "wireMode",
+                           "frameShift", "ExGate", "Frequency"},
+    "VoiDPlugins.Filter.Reconstructor": {"EMAWeight"},
+    "BezierInterpolator.BezierInterp": {"SmoothingFactor", "TiltSmoothingFactor", "Frequency"},
     "Saturn.AreaRoundingDFC": {"threshold", "dPower", "xDiv", "yDiv", "xMul", "yMul"},
     "Kuuube_s_Chatter_Exterminator.Kuuube_s_CHATTER_EXTERMINATOR_RAW":
         {"Chatter_Extermination_Strength"},
@@ -82,6 +87,27 @@ def _all_engine_reasons():
     rotated = replace(current, tablet_area=Rect(80, 45, 76, 47.5, 90.0))
     for cand in generate_candidates(tablets[0], displays[0], UserPreferences(), set(), None, rotated):
         reasons += cand.reasons
+    # Plugin policies and community presets.
+    presets = load_presets().presets
+    radial = ProfileInfo("Wacom CTL-472", "abs", Rect(1920, 1080, 960, 540),
+                         Rect(71.66, 41.44, 76, 47.5, 180.0), True,
+                         (FilterConfig("RadialFollow.RadialFollowSmoothingTabletSpace", True,
+                                       {"OuterRadius": 0.71, "InnerRadius": 0.37,
+                                        "SmoothingCoefficient": 0.37, "SoftKneeScale": 0.38,
+                                        "SmoothingLeakCoefficient": 0.26}),))
+    ctl472 = TabletSpec("Wacom CTL-472", 152, 95, 133)
+    for policy, profile in itertools.product(PluginPolicy, (radial, None)):
+        prefs = UserPreferences(plugin_policy=policy)
+        cands = generate_candidates(ctl472, displays[1], prefs, set(catalog), None, profile, presets)
+        for cand in cands:
+            reasons += cand.reasons
+            refined = refine(cand, [CandidateResult(cand.id)], prefs, set(catalog))
+            if refined is not None:
+                reasons += refined.reasons
+    for preset in presets:
+        reasons += community.adapt_preset(preset, Rect(71.66, 41.44, 76, 47.5), catalog)[1]
+        reasons += community.adapt_preset(preset, Rect(30, 20, 76, 47.5), catalog)[1]
+        reasons.append(community.source_reason(preset))
     return reasons
 
 
@@ -130,9 +156,34 @@ class CatalogTests(unittest.TestCase):
     def test_catalog_keys_exist_in_both_languages(self) -> None:
         es, en = _locale("es"), _locale("en")
         for spec in self.catalog.values():
-            for key in (spec.summary_key, spec.added_latency_note):
+            for key in (spec.summary_key, spec.added_latency_note) + ((spec.policy_note,) if spec.policy_note else ()):
                 self.assertIn(key, es)
                 self.assertIn(key, en)
+
+    def test_research_corrections_applied(self) -> None:
+        rf = self.catalog["RadialFollow.RadialFollowSmoothingTabletSpace"].param("SmoothingCoefficient")
+        self.assertEqual(rf.clamp(0.995), 0.995)          # the pxlwh preset value is representable
+        self.assertEqual(self.catalog["TemporalResampler"].stage, "pre")   # Raw == PreTransform in 0.6
+        self.assertEqual(self.catalog["TabletDriverFilters.Devocub.Antichatter"].plugin_name, "DevocubFilters")
+        self.assertEqual(self.catalog["OpenTabletDriver.Plugin.NoiseReduction"].plugin_name, "HawkuFilters")
+        for path in ("FrenetSerretFramePredictor.FrenetSerretFramePredictor",
+                     "ScuffedInterpolator.ScuffedInterp"):
+            self.assertFalse(self.catalog[path].auto_recommend, path)
+            self.assertEqual(self.catalog[path].policy_note, "engine.policy.input_assist")
+        for spec in self.catalog.values():
+            self.assertTrue(spec.homepage.startswith("https://"), spec.path)
+
+    def test_catalog_override_round_trip(self) -> None:
+        from osu_tablet_assistant.knowledge import filters as kf
+        doc = kf.packaged_document()
+        doc["filters"] = doc["filters"][:2]
+        kf.set_catalog_override(doc)
+        self.addCleanup(kf.set_catalog_override, None)
+        self.assertEqual(len(load_catalog()), 2)
+        kf.set_catalog_override(None)
+        self.assertGreater(len(load_catalog()), 2)
+        with self.assertRaises(ValueError):
+            kf.set_catalog_override({"filters": [{"path": "x"}]})
 
     def test_load_catalog_returns_a_fresh_dict(self) -> None:
         self.catalog.clear()

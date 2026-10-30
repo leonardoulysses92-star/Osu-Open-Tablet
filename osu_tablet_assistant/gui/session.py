@@ -10,6 +10,7 @@ needs ``confirmed=True`` and is preceded by exactly one settings backup.
 from __future__ import annotations
 
 import importlib
+import math
 import re
 import sys
 import time
@@ -18,6 +19,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable
 
+from ..appconfig import AppConfig, preset_file_name
 from ..knowledge import tablets as tablet_db
 from ..models import (
     ApplyResult,
@@ -26,6 +28,7 @@ from ..models import (
     DisplaySpec,
     MetricsReport,
     PluginInfo,
+    PluginPolicy,
     ProfileInfo,
     Rect,
     TabletSpec,
@@ -42,6 +45,9 @@ MAX_REFINE_ROUNDS = 5
 _SETTINGS_IO = "osu_tablet_assistant.otd.settings_io"
 _PLUGINS = "osu_tablet_assistant.otd.plugins"
 _RECOMMEND = "osu_tablet_assistant.engine.recommend"
+_COMMUNITY = "osu_tablet_assistant.engine.community"
+_UPDATER = "osu_tablet_assistant.knowledge.updater"
+COMMUNITY_CANDIDATES = 3     # closest community presets measured per run (plus the chosen start)
 
 
 class Step(str, Enum):
@@ -150,6 +156,17 @@ class Services:
     refine: Callable[..., Candidate | None] = _lazy(_RECOMMEND, "refine")
     load_filter_catalog: Callable[[], dict[str, Any]] = _lazy(
         "osu_tablet_assistant.knowledge.filters", "load_catalog")
+    # community presets (knowledge.presets / engine.community), OTD locations, app config
+    load_community_presets: Callable[[], Any] = _lazy(
+        "osu_tablet_assistant.knowledge.presets", "load_presets")
+    community: Callable[[], Any] = lambda: importlib.import_module(_COMMUNITY)
+    config_locations: Callable[..., list[Any]] = _lazy(_SETTINGS_IO, "config_locations")
+    version_notice: Callable[[dict], Any] = _lazy(_SETTINGS_IO, "version_notice")
+    save_app_config: Callable[..., Path] = _lazy("osu_tablet_assistant.appconfig", "save_config")
+    # knowledge.updater (community data freshness; network only when the user asks)
+    update_community_data: Callable[..., Any] = _lazy(_UPDATER, "update")
+    community_data_status: Callable[..., dict[str, Any]] = _lazy(_UPDATER, "status")
+    activate_data_cache: Callable[[Path], Any] = _lazy(_UPDATER, "activate_cache")
     # osu_tablet_assistant.gui.live_tests
     run_test: Callable[..., None] = _lazy("osu_tablet_assistant.gui.live_tests", "run_test")
     # this package
@@ -164,6 +181,15 @@ class TabletChoice:
     label: str
     tablet: TabletSpec | None
     profile: ProfileInfo | None
+
+
+@dataclass(frozen=True)
+class StartingPreset:
+    """One row of the "starting preset" step (``id`` is the candidate id, texts are translated)."""
+    id: str
+    label: str
+    summary: str
+    preset: Any = None          # the knowledge.presets.CommunityPreset
 
 
 @dataclass
@@ -195,6 +221,15 @@ class Session:
     chosen_id: str | None = None
     refine_rounds: int = 0
     converged: bool = False
+    # community presets ("starting preset" step) and the program's own settings
+    starting_presets: list[Any] = field(default_factory=list)
+    starting_preset_id: str | None = None
+    app_config: AppConfig = field(default_factory=AppConfig)
+    app_config_path: Path | None = None      # None = do not persist (tests, --dry-run unaffected)
+    locations: list[Any] = field(default_factory=list)   # settings_io.ConfigLocation
+    otd_notice: tuple[str, dict[str, Any]] | None = None
+    data_cache_dir: Path | None = None       # cached community data; None = updates disabled
+    data_bundle: Any = None                  # the active downloaded bundle, if any
     # side effects already performed
     backup_path: Path | None = None
     live_candidate_id: str | None = None
@@ -295,6 +330,26 @@ class Session:
         self.settings, self.profiles = settings, list(profiles)
         if self.tablet is not None:
             self.profile = self._profile_for(self.tablet)
+        self.otd_notice = self._optional(self.services.version_notice, settings)
+        self.refresh_locations()
+
+    def _optional(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
+        """Call a decoration-only service; a failure is logged, never raised."""
+        try:
+            return fn(*args, **kwargs)
+        except Exception as exc:  # optional features must never break the wizard
+            self.log.append(f"{getattr(fn, '__name__', 'service')}: {type(exc).__name__}: {exc}")
+            return None
+
+    def refresh_locations(self) -> list[Any]:
+        """Every OTD settings location found (per-user folder and portable installs)."""
+        extra = [Path(self.app_config.output_dir)] if self.app_config.output_dir else []
+        if self.config_dir is not None:
+            extra.append(self.config_dir.parent if self.config_dir.name == "userdata" else self.config_dir)
+        if self.install_dir is not None:
+            extra.append(self.install_dir)
+        self.locations = list(self._optional(self.services.config_locations, extra=extra) or [])
+        return self.locations
 
     # ------------------------------------------------------------------ tablet
     def tablet_choices(self) -> list[TabletChoice]:
@@ -428,24 +483,104 @@ class Session:
 
     # -------------------------------------------------------------- candidates
     def _current_fingerprint(self) -> str:
-        return repr((self.tablet, self.display, self.prefs, tuple(self.baseline), self.profile))
+        return repr((self.tablet, self.display, self.prefs, tuple(self.baseline), self.profile,
+                     self.starting_preset_id))
 
     def ensure_candidates(self) -> None:
         """Generate candidates unless they already match the current inputs."""
         if not self.candidates or self._fingerprint != self._current_fingerprint():
             self.generate_candidates()
 
+    # ------------------------------------------------------- community presets
+    def _selection_area(self) -> Rect:
+        """Area used to rank presets: the current one, else the whole tablet."""
+        if self.profile is not None and self.profile.tablet_area.width > 0:
+            return self.profile.tablet_area
+        if self.tablet is not None:
+            return Rect(self.tablet.width_mm, self.tablet.height_mm, 0, 0)
+        return Rect(0, 0, 0, 0)
+
+    def community_presets(self) -> list[Any]:
+        """Every validated community preset (empty on any problem: the data is optional)."""
+        bundle = self._optional(self.services.load_community_presets)
+        return list(getattr(bundle, "presets", ()) or ())
+
+    def refresh_starting_presets(self) -> list[StartingPreset]:
+        """Fill :attr:`starting_presets` with the presets usable under the plugin policy."""
+        comm = self._optional(self.services.community)
+        presets = self.community_presets()
+        if comm is None or not presets or self.tablet is None:
+            self.starting_presets = []
+        else:
+            catalog = self._optional(self.services.load_filter_catalog) or {}
+            options = self._optional(comm.starting_options, presets, self.tablet, self._selection_area(),
+                                     self.profile, self.prefs.plugin_policy, set(self.filter_paths),
+                                     catalog) or []
+            self.starting_presets = [StartingPreset(p.candidate_id, preset_label(p, catalog),
+                                                    preset_summary(p), p) for p in options]
+        if self.starting_preset_id not in {p.id for p in self.starting_presets}:
+            self.starting_preset_id = None
+        return self.starting_presets
+
+    def _chosen_community(self) -> list[Any]:
+        """The community presets to turn into candidates (the chosen start + the closest ones)."""
+        comm = self._optional(self.services.community)
+        presets = self.community_presets()
+        if comm is None or not presets or self.tablet is None:
+            return []
+        catalog = self._optional(self.services.load_filter_catalog) or {}
+        include = [self.starting_preset_id] if self.starting_preset_id else []
+        return list(self._optional(
+            comm.select_presets, presets, self.tablet, self._selection_area(), self.profile,
+            self.prefs.plugin_policy, set(self.filter_paths), catalog, COMMUNITY_CANDIDATES, include) or [])
+
+    def plugin_suggestions(self) -> list[Any]:
+        """Not-installed plugins worth a look (only with the ``allow_new`` policy)."""
+        if self.prefs.plugin_policy is not PluginPolicy.ALLOW_NEW:
+            return []
+        comm = self._optional(self.services.community)
+        if comm is None:
+            return []
+        catalog = self._optional(self.services.load_filter_catalog) or {}
+        refresh = self.display.refresh_hz if self.display is not None else 60.0
+        wanted = self._optional(comm.wanted_paths, self.tablet, refresh, set(self.filter_paths),
+                                self.prefs.notices_jitter) or []
+        return list(self._optional(comm.plugin_suggestions, self.community_presets(), self.tablet,
+                                   self._selection_area(), self.profile, set(self.filter_paths),
+                                   catalog, wanted) or [])
+
+    def community_comparison(self, best: Candidate, limit: int = 3) -> list[Any]:
+        """The closest community presets and how ``best`` differs from them."""
+        comm = self._optional(self.services.community)
+        presets = self.community_presets()
+        if comm is None or not presets:
+            return []
+        catalog = self._optional(self.services.load_filter_catalog) or {}
+        return list(self._optional(comm.compare_with_best, best, presets, self.tablet, self.profile,
+                                   catalog, limit) or [])
+
     def generate_candidates(self) -> list[Candidate]:
-        """(Re)build the candidate list from the current choices and baseline."""
+        """(Re)build the candidate list from the current choices and baseline.
+
+        Community presets (the chosen starting preset first, then the closest
+        usable ones) are passed to the engine as extra candidates; a chosen
+        starting preset is measured first.
+        """
         if self.tablet is None or self.display is None:
             raise SessionError("core.error.incomplete")
-        found = self._call(
-            "core.error.generate", self.services.generate_candidates, self.tablet,
-            self.otd_display(), self.prefs, set(self.filter_paths), list(self.baseline) or None,
-            self.profile)
+        community = self._chosen_community()
+        args: tuple[Any, ...] = (self.tablet, self.otd_display(), self.prefs, set(self.filter_paths),
+                                 list(self.baseline) or None, self.profile)
+        found = self._call("core.error.generate", self.services.generate_candidates,
+                           *(args + ((community,) if community else ())))
         if not found:
             raise SessionError("core.error.no_candidates")
-        self.candidates = list(found)
+        found = list(found)
+        start = next((c for c in found if c.id == self.starting_preset_id), None)
+        if start is not None:
+            found.remove(start)
+            found.insert(0, start)
+        self.candidates = found
         self.results, self.chosen_id = {}, None
         self.refine_rounds, self.converged = 0, False
         self._fingerprint = self._current_fingerprint()
@@ -606,16 +741,90 @@ class Session:
         tablet = re.sub(r"[^\w\- ]+", "", self.tablet.name if self.tablet else "tablet").strip()
         return f"osu-assistant {tablet} {time.strftime('%Y%m%d-%H%M%S')}"
 
-    def export_preset(self, *, confirmed: bool) -> Path:
-        """Save the final settings as an OTD preset (after a backup)."""
+    # ------------------------------------------------- output folder / settings
+    @property
+    def output_dir(self) -> Path | None:
+        """The folder the user chose for saved presets (None = OTD's Presets folder)."""
+        return Path(self.app_config.output_dir) if self.app_config.output_dir else None
+
+    def default_export_name(self) -> str:
+        """Editable default file name: the configured template, "<tablet> <timestamp>" by default."""
+        tablet = self.tablet.name if self.tablet else "tablet"
+        return preset_file_name(self.app_config.preset_name_template, tablet)
+
+    def export_target(self, name: str | None = None) -> Path:
+        """Where :meth:`export_preset` would write (the GUI asks before overwriting it)."""
+        if self.output_dir is not None:
+            return self.output_dir / f"{name or self.default_export_name()}.json"
+        if self.config_dir is None:
+            raise SessionError("core.error.no_config_dir")
+        return self.config_dir / "Presets" / f"{name or self.preset_name()}.json"
+
+    def set_output_dir(self, folder: Path | None) -> None:
+        """Remember the output folder (persisted when the app config has a path)."""
+        self.app_config.output_dir = str(folder) if folder else None
+        self._optional(self.save_app_config)
+
+    def set_plugin_policy(self, policy: PluginPolicy) -> None:
+        """Change the plugin policy for this run and remember it."""
+        self.prefs.plugin_policy = PluginPolicy(policy)
+        self.app_config.plugin_policy = self.prefs.plugin_policy.value
+        self._optional(self.save_app_config)
+
+    def community_status(self) -> dict[str, Any] | None:
+        """Date, preset and source counts, origin and staleness of the community data."""
+        return self._optional(self.services.community_data_status, self.data_bundle)
+
+    def update_community_data(self) -> Any:
+        """Download, validate and activate the community data (only when the user asks).
+
+        Returns the updater's ``UpdateResult``; the candidates are rebuilt next
+        time because the presets may have changed. Raises SessionError when
+        updates are disabled (no cache folder).
+        """
+        if self.data_cache_dir is None:
+            raise SessionError("core.update.error.disabled")
+        result = self._call("core.update.error.offline", self.services.update_community_data,
+                            self.app_config.update_url, self.data_cache_dir)
+        if getattr(result, "ok", False):
+            self.data_bundle = result.bundle or self.data_bundle
+            self.app_config.last_update_check = time.strftime("%Y-%m-%dT%H:%M:%S")
+            self._optional(self.save_app_config)
+            self._fingerprint = ""   # rebuilt the next time the wizard enters the testing step
+            self.refresh_starting_presets()
+        self.log.append(f"community data: {getattr(result, 'key', '?')} {getattr(result, 'detail', '')}".strip())
+        return result
+
+    def save_app_config(self) -> Path | None:
+        """Persist :attr:`app_config` (no-op without :attr:`app_config_path`)."""
+        if self.app_config_path is None:
+            return None
+        return self._call("core.error.app_config", self.services.save_app_config,
+                          self.app_config, self.app_config_path)
+
+    def export_preset(self, *, confirmed: bool, name: str | None = None, overwrite: bool = False) -> Path:
+        """Save the final settings, as a complete OTD settings file, after a backup.
+
+        Without an output folder it goes to OTD's ``Presets`` folder (as
+        before); with one, to ``<output>/<name>.json`` (``name`` defaults to
+        :meth:`default_export_name`). Replacing an existing file needs
+        ``overwrite=True`` (the GUI confirms first) and keeps a dated copy in
+        ``<output>/Backup/``.
+        """
         self._require(confirmed)
         if self.config_dir is None:
             raise SessionError("core.error.no_config_dir")
         settings = self.final_settings()
         self.ensure_backup()
-        self.preset_path = self._call(
-            "core.error.preset", self.services.save_preset, self.config_dir,
-            self.preset_name(), settings)
+        if self.output_dir is None and not overwrite and name is None:
+            self.preset_path = self._call(
+                "core.error.preset", self.services.save_preset, self.config_dir,
+                self.preset_name(), settings)
+        else:
+            target = self.export_target(name)
+            self.preset_path = self._call(
+                "core.error.preset", self.services.save_preset, self.config_dir, target.stem, settings,
+                overwrite=overwrite, destination=target.parent)
         self.log.append(f"preset: {self.preset_path}")
         return self.preset_path
 
@@ -661,8 +870,9 @@ class Session:
                        maps=t(f"core.pref.map_preference.{prefs.map_preference.value}"),
                        priority=t(f"core.pref.priority.{prefs.priority.value}"),
                        skill=t(f"core.pref.skill_level.{prefs.skill_level.value}")))
+        lines.append(t("core.report.policy", policy=t(f"core.pref.plugin_policy.{prefs.plugin_policy.value}")))
         lines += ["", t("core.report.section_settings"),
-                  t("core.report.chosen", label=t(best.label_key), summary=t(best.summary_key))]
+                  t("core.report.chosen", label=candidate_label(self, best), summary=t(best.summary_key))]
         area = best.changes.tablet_area
         if area is not None:
             lines.append(t("core.report.area", w=f"{area.width:.1f}", h=f"{area.height:.1f}",
@@ -716,4 +926,184 @@ def metric_lines(reports: tuple[MetricsReport, ...] | list[MetricsReport]) -> li
             if value is not None:
                 lines.append(t(key, value=fmt.format(value)))
     return lines
+
+
+_LABEL_REASONS = ("engine.reason.community_source", "engine.reason.community_source_undated",
+                  "engine.reason.community_user_values")
+
+
+def candidate_label(session: Session | None, cand: Candidate) -> str:
+    """Translated label of a candidate; community ones carry the publisher's name.
+
+    A refined candidate (``<root>|...``) takes the name from its root candidate.
+    """
+    sources = [cand]
+    if session is not None and "|" in cand.id:
+        root = cand.id.split("|", 1)[0]
+        sources += [c for c in session.candidates if c.id == root]
+    for source in sources:
+        for reason in source.reasons:
+            if reason.key in _LABEL_REASONS:
+                return t(cand.label_key, name=reason.params.get("name", ""))
+    return t(cand.label_key)
+
+
+def preset_label(preset: Any, catalog: dict[str, Any]) -> str:
+    """"<who> - <filters> (<tablet>, <area>)" for the starting-preset list."""
+    names = ", ".join(getattr(catalog.get(f.path), "display_name", None) or f.path
+                      for f in preset.enabled_filters) or t("gui.preset.no_filters")
+    who = preset.name if preset.attribution != "user" else t("gui.preset.user_values")
+    area = f"{preset.area_mm[0]:g} x {preset.area_mm[1]:g} mm" if preset.area_mm else t("gui.preset.area_unknown")
+    return t("gui.preset.item", who=who, filters=names, tablet=preset.tablet or "?", area=area)
+
+
+def preset_summary(preset: Any) -> str:
+    """Source, date and confidence of a preset, translated."""
+    return t("gui.preset.item_source", source=preset.source_url or t("gui.preset.no_source"),
+             date=preset.source_date or t("gui.preset.undated", retrieved=preset.retrieved),
+             confidence=t(f"gui.preset.confidence.{preset.confidence}"))
+
+
+# --------------------------------------------------------------------------
+# Presentation helpers for the result screen (pure: no Tk, no side effects)
+# --------------------------------------------------------------------------
+KEEP_CURRENT_ID = "keep-current"
+# label key, test kind, MetricsReport attribute, unit, decimals (all: lower is better)
+_COMPARED: tuple[tuple[str, str, str, str, int], ...] = (
+    ("gui.compare.jitter", "stillness", "jitter_rms_mm", "mm", 3),
+    ("gui.compare.tracking", "tracking", "path_error_mean_mm", "mm", 2),
+    ("gui.compare.aim_time", "aim", "aim_time_ms_mean", "ms", 0),
+)
+
+
+@dataclass(frozen=True)
+class ComparisonRow:
+    """One before/after metric of the result screen (None = not measured)."""
+    key: str
+    before: float | None
+    after: float | None
+    unit: str
+    digits: int
+    lower_is_better: bool = True
+
+    @property
+    def label(self) -> str:
+        """Translated metric name."""
+        return t(self.key)
+
+
+def _metric(reports: Any, kind: str, attr: str) -> float | None:
+    for report in reports:
+        if report.test_kind == kind and getattr(report, attr) is not None:
+            return float(getattr(report, attr))
+    return None
+
+
+def build_comparison(before: Any, after: Any, before_latency: float | None,
+                     after_latency: float | None) -> list[ComparisonRow]:
+    """Rows for jitter, tracking error, aim time and added latency from two report sets."""
+    rows = [ComparisonRow(key, _metric(before, kind, attr), _metric(after, kind, attr), unit, digits)
+            for key, kind, attr, unit, digits in _COMPARED]
+    rows.append(ComparisonRow("gui.compare.latency", before_latency, after_latency, "ms", 1))
+    return rows
+
+
+def comparison_for(session: Session, best: Candidate) -> list[ComparisonRow]:
+    """Before (the user's current setup) vs after (``best``) for the result screen.
+
+    "Before" is the measured "keep current" option when there is one, topped
+    up with the baseline; its added latency is that option's estimate, or 0
+    when the current profile has no enabled filter.
+    """
+    current = next((c for c in session.candidates if c.id == KEEP_CURRENT_ID), None)
+    current_result = session.results.get(current.id) if current is not None else None
+    before = list(current_result.reports) if current_result else []
+    kinds = {r.test_kind for r in before}
+    before += [r for r in session.baseline if r.test_kind not in kinds]
+    best_result = session.results.get(best.id)
+    after = list(best_result.reports) if best_result else []
+    if current is not None:
+        before_latency: float | None = current.est_added_latency_ms
+    elif session.profile is not None and not any(f.enabled for f in session.profile.filters):
+        before_latency = 0.0
+    else:
+        before_latency = None
+    return build_comparison(before, after, before_latency, best.est_added_latency_ms)
+
+
+def describe_changes(current: ProfileInfo | None, changes: Any, name_of: Callable[[str], str],
+                     added_latency_ms: float = 0.0, detail: bool = False) -> list[tuple[str, dict[str, Any]]]:
+    """What ``changes`` (a ``ProfileChanges``) does to ``current``, as ``(i18n key, params)`` lines.
+
+    With ``detail`` every changed parameter of a tuned filter gets its own
+    ``old -> new`` line (``gui.change.param``).
+    """
+    out: list[tuple[str, dict[str, Any]]] = []
+    area = changes.tablet_area
+    old = current.tablet_area if current is not None and current.tablet_area.width > 0 else None
+    if area is None:
+        out.append(("gui.change.area_kept", {}))
+    elif old is None:
+        out.append(("gui.change.area_new", {"w": f"{area.width:.1f}", "h": f"{area.height:.1f}"}))
+    else:
+        ratio = area.width / old.width - 1.0
+        params = {"old_w": f"{old.width:.1f}", "old_h": f"{old.height:.1f}", "w": f"{area.width:.1f}",
+                  "h": f"{area.height:.1f}", "pct": f"{abs(ratio) * 100:.0f}"}
+        key = "gui.change.area_same" if abs(ratio) < 0.01 else (
+            "gui.change.area_smaller" if ratio < 0 else "gui.change.area_larger")
+        out.append((key, params))
+        if math.hypot(area.x - old.x, area.y - old.y) > 1.0:
+            out.append(("gui.change.area_moved", {"x": f"{area.x:.1f}", "y": f"{area.y:.1f}"}))
+        if (area.rotation or 0.0) != (old.rotation or 0.0):
+            out.append(("gui.change.area_rotated", {"rot": f"{area.rotation:g}"}))
+    if changes.filters is None:
+        out.append(("gui.change.filters_kept", {}))
+    else:
+        before = {f.path: f for f in (current.filters if current is not None else ()) if f.enabled}
+        after = {f.path: f for f in changes.filters if f.enabled}
+        if not after:
+            out.append(("gui.change.filters_removed_all" if before else "gui.change.filters_none", {}))
+        for path, cfg in after.items():
+            if path not in before:
+                key = "gui.change.filter_added"
+            elif dict(before[path].settings) != dict(cfg.settings):
+                key = "gui.change.filter_tuned"
+            else:
+                key = "gui.change.filter_same"
+            out.append((key, {"name": name_of(path)}))
+            if detail and key == "gui.change.filter_tuned":
+                old = dict(before[path].settings)
+                out += [("gui.change.param", {"name": name_of(path), "param": param,
+                                              "old": format_value(old.get(param, "-")),
+                                              "new": format_value(value)})
+                        for param, value in cfg.settings.items() if old.get(param) != value]
+        if after:   # "all removed" already says it when nothing is left
+            out += [("gui.change.filter_removed", {"name": name_of(path)}) for path in before
+                    if path not in after]
+    if added_latency_ms > 0:
+        out.append(("gui.change.latency", {"ms": f"{added_latency_ms:.1f}"}))
+    return out
+
+
+def format_value(value: Any) -> str:
+    """A filter setting as the user reads it (booleans translated, floats trimmed)."""
+    if isinstance(value, bool):
+        return t("gui.value.on" if value else "gui.value.off")
+    if isinstance(value, float):
+        return f"{value:.4f}".rstrip("0").rstrip(".") if math.isfinite(value) else str(value)
+    return str(value)
+
+
+def filter_table(filters: Any, catalog: dict[str, Any]) -> list[tuple[str, bool, list[tuple[str, str, str]]]]:
+    """``(filter name, enabled, [(parameter, value, unit), ...])`` per filter of a chain."""
+    rows = []
+    for cfg in filters:
+        spec = catalog.get(cfg.path)
+        name = getattr(spec, "display_name", None) or cfg.path
+        params = []
+        for key, value in cfg.settings.items():
+            param = spec.param(key) if spec is not None and hasattr(spec, "param") else None
+            params.append((key, format_value(value), getattr(param, "unit", "") or ""))
+        rows.append((name, bool(cfg.enabled), params))
+    return rows
 

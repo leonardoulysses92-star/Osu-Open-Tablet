@@ -1,0 +1,544 @@
+[
+  {
+    "id": "cryshina-profile-2025",
+    "player": "cryshina (osu! id 14715160; global #2 on 2026-10-30)",
+    "tablet": "Wacom CTL-472",
+    "area_mm": {"width": 59, "height": 46},
+    "rotation_deg": 180,
+    "filters": [
+      {"path": "RadialFollow.RadialFollowSmoothingTabletSpace", "enabled": null,
+       "settings": {"OuterRadius": 0.5364, "InnerRadius": 0.338, "SmoothingCoefficient": 0.338, "SoftKneeScale": 0.43045, "SmoothingLeakCoefficient": 0.23017}}
+    ],
+    "style_tags": ["top10", "tablet_space_radial_follow", "mixmg_calculator", "rotated_180", "absolute_mode"],
+    "source_url": "https://osu.ppy.sh/users/14715160",
+    "source_date": null,
+    "retrieved": "2026-10-30",
+    "confidence": "high",
+    "notes": "Read from OTD screenshots embedded in the player's own osu! profile (images i.ibb.co/KxnS1wzQ, i.ibb.co/Tp0RrKj). Area screenshot also shows X 76 mm, Y 47.5 mm, Absolute Mode. Display 2080x1180 render ('custom 1000hz firmware' link to files.shav.it/osu/tablet/). In the cropped filter screenshot the 'Enable' checkbox looks unticked, so enabled state is unclear. A third screenshot shows Kuuube's CHATTER EXTERMINATOR RAW, strength 3, also with the checkbox unticked. Profile text: '!!!CONFIGURE ABSTRACTQBIT FILTER MANUALLY TO YOUR OWN AREA!!!' and links mixmg.github.io. The radial values equal the Mixmg calculator output for a 60 x 52 mm area (outer = 0.00894*W, inner = coefficient = 0.0065*H), not for the 59 x 46 area shown, so the filter screenshot may predate the area screenshot. Undated; the Mixmg calculator exists since 2024-11-03, so not older than that."
+  },
+  {
+    "id": "cryshina-setupmoe",
+    "player": "cryshina (osu! id 14715160; global #2)",
+    "tablet": "Wacom CTL-472",
+    "area_mm": {"width": 61, "height": 49},
+    "rotation_deg": null,
+    "filters": [
+      {"path": "RadialFollow.RadialFollowSmoothingTabletSpace", "enabled": true,
+       "settings": {"OuterRadius": 0.54534, "InnerRadius": 0.32175, "SmoothingCoefficient": 0.42558, "SoftKneeScale": 0.42558, "SmoothingLeakCoefficient": 0.24091}}
+    ],
+    "style_tags": ["top10", "drag", "tablet_space_radial_follow", "raw_input_off"],
+    "source_url": "https://setup.moe/u/93",
+    "source_date": null,
+    "retrieved": "2026-10-30",
+    "confidence": "high",
+    "notes": "Self-entered on setup.moe (ex osusettings.top; users edit their own profile after osu! login). Playstyle drag, absolute, raw input off, 1600x900 170 Hz. OuterRadius 0.54534 equals Mixmg output for width 61; InnerRadius 0.32175 does not match Mixmg for height 49 (0.3185) and SmoothingCoefficient equals SoftKneeScale, so one value may be a typo. Differs from the profile screenshots (59 x 46): the player has changed setup over time."
+  },
+  {
+    "id": "mrekk-liquipedia-2024",
+    "player": "mrekk (osu! id 7562902; global #1 on 2026-10-30)",
+    "tablet": "Wacom PTK-470",
+    "area_mm": {"width": 58, "height": 45.24},
+    "rotation_deg": null,
+    "filters": [],
+    "style_tags": ["top10", "filters_unknown", "small_area"],
+    "source_url": "https://liquipedia.net/osu/Mrekk",
+    "source_date": "2024-08-14",
+    "retrieved": "2026-10-30",
+    "confidence": "medium",
+    "notes": "Liquipedia tablet settings table dated 2024-08-14 with an empty ref field; offset X 83.06 mm, Y 68.57 mm; raw input true; hardware table (2024-10-07) lists 2560x1440 480 Hz. osuconfigs.com reportedly lists the same 58 x 45.24 area but on a CTL-472 (site down, not verified). osu! forum (2022) hearsay: CTL-472 and 'hawku drivers'. No public source found for any mrekk filter. The user-supplied radial values (0.71/0.37/0.37/0.38/0.26) do NOT correspond to this area in the Mixmg calculator (58 x 45.24 gives 0.51852/0.29406/0.29406/0.43214/0.24753)."
+  },
+  {
+    "id": "user-seed-radial-unverified",
+    "player": null,
+    "tablet": null,
+    "area_mm": null,
+    "rotation_deg": null,
+    "filters": [
+      {"path": "RadialFollow.RadialFollowSmoothingTabletSpace", "enabled": true,
+       "settings": {"OuterRadius": 0.71, "InnerRadius": 0.37, "SmoothingCoefficient": 0.37, "SoftKneeScale": 0.38, "SmoothingLeakCoefficient": 0.26}}
+    ],
+    "style_tags": ["unverified", "tablet_space_radial_follow", "mixmg_calculator"],
+    "source_url": "https://mixmg.github.io/smoothing/smoothing-calculator.html",
+    "source_date": null,
+    "retrieved": "2026-10-30",
+    "confidence": "low",
+    "notes": "User's screenshot, claimed to be mrekk's. Not found published anywhere. The values match the Mixmg calculator output for an area of about 79.5 x 57 mm rounded to 2 decimals (79.5 x 57 gives 0.71073/0.37050/0.37050/0.38326/0.26198, smoothing toggle off). Closest published real config: Dever (80 x 60 mm, 0.7152/0.39/0.39/0.38357/0.25419). Attribution to mrekk is unsupported."
+  },
+  {
+    "id": "superi0r-setupmoe",
+    "player": "superi0r (osu! id 17235399; global #16)",
+    "tablet": "Wacom CTL-472",
+    "area_mm": {"width": 42, "height": 30},
+    "rotation_deg": null,
+    "filters": [],
+    "style_tags": ["top20", "hybrid", "no_filter", "small_area", "raw_input_off"],
+    "source_url": "https://setup.moe/u/1183",
+    "source_date": null,
+    "retrieved": "2026-10-30",
+    "confidence": "high",
+    "notes": "setup.moe filter section lists Radial Follow, Devocub, Temporal Resampler and both Chatter Exterminators all with enabled=false (default values), i.e. explicitly no filter. 1920x1080 280 Hz."
+  },
+  {
+    "id": "ferret-irl-full-area-circular",
+    "player": "ferret irl (osu! id 6725771; global #24)",
+    "tablet": "Wacom CTL-472",
+    "area_mm": {"width": 152, "height": 95},
+    "rotation_deg": null,
+    "filters": [
+      {"path": "Kuuube_s_Chatter_Exterminator.Kuuube_s_CHATTER_EXTERMINATOR_SMOOTH", "enabled": true,
+       "settings": {"Chatter_Extermination_Strength": 10}}
+    ],
+    "style_tags": ["top30", "full_area", "circular_area", "drag", "raw_input_off"],
+    "source_url": "https://setup.moe/u/1579",
+    "source_date": null,
+    "retrieved": "2026-10-30",
+    "confidence": "high",
+    "notes": "osu! profile (https://osu.ppy.sh/users/6725771): 'CTL-472 full area' with Kuuube's Circular_Area Schwarz-Christoffel mapping ('ellipse with 2a=152mm 2b=95mm'). Circular Area plugin path/properties not captured. Chatter Exterminator SMOOTH 10 from setup.moe (README recommends 6-7 drag, 15-16 hover)."
+  },
+  {
+    "id": "saiyku-full-area-hover",
+    "player": "saiyku (osu! id 13767572; global #26)",
+    "tablet": "Huion H1161",
+    "area_mm": {"width": 280, "height": 157},
+    "rotation_deg": null,
+    "filters": [
+      {"path": "VoiDPlugins.Filter.Reconstructor", "enabled": true, "settings": {"EMAWeight": 0.31}}
+    ],
+    "style_tags": ["top30", "full_area", "hover", "reconstructor", "raw_input_off"],
+    "source_url": "https://setup.moe/u/3806",
+    "source_date": null,
+    "retrieved": "2026-10-30",
+    "confidence": "high",
+    "notes": "osu! profile says 'full area (280 x 157.5 mm) + full key' and lists tablet changes on 2020-06-18 (221x138mm) and 2021-11-19 (279x157mm). Reconstructor (X9VoiD) EMA Weight 0.31 removes hardware smoothing; plugin path/property verified in VoiDPlugins source."
+  },
+  {
+    "id": "chocopafe-tr-radial",
+    "player": "ChocoPafe (osu! id 8856806; global #28)",
+    "tablet": "Wacom CTL-672",
+    "area_mm": {"width": 70, "height": 36},
+    "rotation_deg": null,
+    "filters": [
+      {"path": "TemporalResampler", "enabled": true,
+       "settings": {"frameShift": 0, "followRadius": 0, "latency": 0, "reverseSmoothing": 1, "extraFrames": true, "loggingEnabled": false}},
+      {"path": "RadialFollow.RadialFollowSmoothingTabletSpace", "enabled": true,
+       "settings": {"OuterRadius": 0.2, "InnerRadius": 0.271, "SmoothingCoefficient": 0.271, "SoftKneeScale": 0.543, "SmoothingLeakCoefficient": 0.181}}
+    ],
+    "style_tags": ["top30", "hover", "temporal_resampler", "tablet_space_radial_follow"],
+    "source_url": "https://setup.moe/u/3031",
+    "source_date": null,
+    "retrieved": "2026-10-30",
+    "confidence": "high",
+    "notes": "As entered: InnerRadius 0.271 > OuterRadius 0.2, which the plugin README says must not happen (likely a typo; big_tatik uses the same inner/knee/leak with OuterRadius 0.633216). 1650x1080 280 Hz. setup.moe field names mapped to OTD names: predictionRatio->frameShift, smoothingLatency->latency, reverseEMA->reverseSmoothing, maximizeFrequency->extraFrames."
+  },
+  {
+    "id": "grrmondays-profile-devocub",
+    "player": "grrmondays / Vudek (osu! id 8816345; global #30)",
+    "tablet": "Wacom CTL-480 (profile says the same area is used on his newer PTK-470)",
+    "area_mm": {"width": 65.4, "height": 44.24},
+    "rotation_deg": 0,
+    "filters": [
+      {"path": "TabletDriverFilters.Devocub.Antichatter", "enabled": true,
+       "settings": {"Latency": 6, "AntichatterStrength": 1.4, "AntichatterMultiplier": 1, "AntichatterOffsetX": 0, "AntichatterOffsetY": 1, "PredictionEnabled": false, "PredictionStrength": 1.1, "PredictionSharpness": 1, "PredictionOffsetX": 3, "PredictionOffsetY": 0.3, "Frequency": 600}}
+    ],
+    "style_tags": ["top30", "devocub", "annotated_guide"],
+    "source_url": "https://osu.ppy.sh/users/8816345",
+    "source_date": null,
+    "retrieved": "2026-10-30",
+    "confidence": "medium",
+    "notes": "Annotated OTD screenshot on his profile (puu.sh/KG8w5): area X 76, Y 49.18275, display 1920x1080. Annotations: strength 'From 1.0 (for flowaim) to 1.6 (for sharp patterns)', multiplier/offsets 'Leave it at 1/0/1', prediction 'never use this', Frequency 'x2 refresh rate of your monitor or a slightly lower value' and 'don't applied for osu!Lazer'. Frequency advice conflicts with our catalog (Frequency is the filter's own timer). Undated screenshot. His current setup.moe entry (https://setup.moe/u/171): PTK-470 64 x 43, hybrid, Linux, no filters listed."
+  },
+  {
+    "id": "karcher-devocub-2021",
+    "player": "[Karcher] (osu! id 11443437; global #43)",
+    "tablet": "Wacom CTH-480",
+    "area_mm": {"width": 96, "height": 54},
+    "rotation_deg": null,
+    "filters": [
+      {"path": "TabletDriverFilters.Devocub.Antichatter", "enabled": true,
+       "settings": {"Latency": 1, "AntichatterStrength": 5, "AntichatterMultiplier": 1, "AntichatterOffsetX": 0, "AntichatterOffsetY": 1, "PredictionEnabled": false, "PredictionStrength": 1.1, "PredictionSharpness": 1, "PredictionOffsetX": 3, "PredictionOffsetY": 0.3, "Frequency": 1000}}
+    ],
+    "style_tags": ["top50", "devocub", "low_latency", "stale"],
+    "source_url": "https://osu.ppy.sh/users/11443437",
+    "source_date": "2021-09-13",
+    "retrieved": "2026-10-30",
+    "confidence": "high",
+    "notes": "Profile text: 'width 96/height 54 (16:9 ratio)' with linked 'filter info' screenshot (imgur-archive.ppy.sh/discord/...886898741095825418); date decoded from the Discord snowflake = 2021-09-13. STALE (5 years old)."
+  },
+  {
+    "id": "gwb-no-filter",
+    "player": "gwb (osu! id 13216706; global #47)",
+    "tablet": "Wacom CTL-472 (profile) / Wacom CTL-4100 (setup.moe)",
+    "area_mm": {"width": 40, "height": 22.5},
+    "rotation_deg": null,
+    "filters": [],
+    "style_tags": ["top50", "no_filter", "small_area", "drag"],
+    "source_url": "https://osu.ppy.sh/users/13216706",
+    "source_date": null,
+    "retrieved": "2026-10-30",
+    "confidence": "high",
+    "notes": "Profile: 'Wacom CTL 472 + opentabletdriver no filter', 'area: 40 x 22.5'. setup.moe (https://setup.moe/u/1542) lists CTL-4100, 40 x 22, drag, 2560x1440 240 Hz, raw input off."
+  },
+  {
+    "id": "z9a-radial",
+    "player": "z9a (osu! id 13057699; global #49)",
+    "tablet": "Wacom PTH-660",
+    "area_mm": {"width": 85, "height": 47},
+    "rotation_deg": null,
+    "filters": [
+      {"path": "RadialFollow.RadialFollowSmoothingTabletSpace", "enabled": true,
+       "settings": {"OuterRadius": 0.5, "InnerRadius": 0.3, "SmoothingCoefficient": 0.1, "SoftKneeScale": 0.2, "SmoothingLeakCoefficient": 0.1}}
+    ],
+    "style_tags": ["top50", "drag", "tablet_space_radial_follow", "hand_tuned"],
+    "source_url": "https://setup.moe/u/1717",
+    "source_date": null,
+    "retrieved": "2026-10-30",
+    "confidence": "high",
+    "notes": "Hand-tuned round values (not a Mixmg output). Same radial values as origin_ (#175). 1920x1080 240 Hz, raw input off."
+  },
+  {
+    "id": "yseri-temporal-resampler",
+    "player": "Yseri (osu! id 11159039; global #55)",
+    "tablet": "Wacom CTL-472",
+    "area_mm": {"width": 61, "height": 47},
+    "rotation_deg": null,
+    "filters": [
+      {"path": "TemporalResampler", "enabled": true,
+       "settings": {"frameShift": 0, "followRadius": 0, "latency": 0, "reverseSmoothing": 0.8, "extraFrames": true, "loggingEnabled": false}}
+    ],
+    "style_tags": ["top100", "hybrid", "temporal_resampler", "reverse_smoothing"],
+    "source_url": "https://setup.moe/u/236",
+    "source_date": null,
+    "retrieved": "2026-10-30",
+    "confidence": "high",
+    "notes": "Resampler used to interpolate the 133 rps CTL-472 for a 240 Hz monitor (2560x1440) and undo some hardware smoothing (Reverse EMA 0.8). Prediction ratio 0 as entered."
+  },
+  {
+    "id": "bouingue-mixmg",
+    "player": "-bouingue (osu! id 17104779; global #66)",
+    "tablet": "Wacom CTL-472",
+    "area_mm": {"width": 76.3, "height": 46},
+    "rotation_deg": null,
+    "filters": [
+      {"path": "RadialFollow.RadialFollowSmoothingTabletSpace", "enabled": true,
+       "settings": {"OuterRadius": 0.682, "InnerRadius": 0.299, "SmoothingCoefficient": 0.299, "SoftKneeScale": 0.385, "SmoothingLeakCoefficient": 0.293}}
+    ],
+    "style_tags": ["top100", "drag", "tablet_space_radial_follow", "mixmg_calculator", "raw_input_on"],
+    "source_url": "https://setup.moe/u/785",
+    "source_date": null,
+    "retrieved": "2026-10-30",
+    "confidence": "high",
+    "notes": "Values are the Mixmg calculator output for exactly 76.3 x 46 (0.68212/0.29900/0.29900/0.38487/0.29335) rounded to 3 decimals. Linux, 1920x1080 240 Hz."
+  },
+  {
+    "id": "dever-mixmg",
+    "player": "Dever (osu! id 16320893; global #86)",
+    "tablet": "Wacom CTL-472",
+    "area_mm": {"width": 80, "height": 60},
+    "rotation_deg": null,
+    "filters": [
+      {"path": "RadialFollow.RadialFollowSmoothingTabletSpace", "enabled": true,
+       "settings": {"OuterRadius": 0.7152, "InnerRadius": 0.39, "SmoothingCoefficient": 0.39, "SoftKneeScale": 0.38357, "SmoothingLeakCoefficient": 0.25419}}
+    ],
+    "style_tags": ["top100", "drag", "tablet_space_radial_follow", "mixmg_calculator"],
+    "source_url": "https://setup.moe/u/2202",
+    "source_date": null,
+    "retrieved": "2026-10-30",
+    "confidence": "high",
+    "notes": "Exact Mixmg calculator output for 80 x 60 (smoothing toggle off). Closest published config to the user's seed values. 2560x1440 240 Hz."
+  },
+  {
+    "id": "big-tatik-tr-radial",
+    "player": "big_tatik (osu! id 15780777; global #128)",
+    "tablet": "Wacom CTL-472",
+    "area_mm": {"width": 50, "height": 32},
+    "rotation_deg": null,
+    "filters": [
+      {"path": "TemporalResampler", "enabled": true,
+       "settings": {"frameShift": 0, "followRadius": 0, "latency": 0, "reverseSmoothing": 1, "extraFrames": true, "loggingEnabled": false}},
+      {"path": "RadialFollow.RadialFollowSmoothingTabletSpace", "enabled": true,
+       "settings": {"OuterRadius": 0.633216, "InnerRadius": 0.271, "SmoothingCoefficient": 0.271, "SoftKneeScale": 0.543, "SmoothingLeakCoefficient": 0.181}}
+    ],
+    "style_tags": ["top200", "drag", "temporal_resampler", "tablet_space_radial_follow", "small_area"],
+    "source_url": "https://setup.moe/u/1024",
+    "source_date": null,
+    "retrieved": "2026-10-30",
+    "confidence": "high",
+    "notes": "Same inner/coefficient/knee/leak as ChocoPafe (#28), suggesting a shared preset. 2560x1440 180 Hz."
+  },
+  {
+    "id": "fleh-radial-ptk470",
+    "player": "Fleh (osu! id 7780605; global #136)",
+    "tablet": "Wacom PTK-470",
+    "area_mm": {"width": 82, "height": 48},
+    "rotation_deg": null,
+    "filters": [
+      {"path": "RadialFollow.RadialFollowSmoothingTabletSpace", "enabled": true,
+       "settings": {"OuterRadius": 0.7, "InnerRadius": 0.5, "SmoothingCoefficient": 0.3, "SoftKneeScale": 0.4, "SmoothingLeakCoefficient": 0.2}}
+    ],
+    "style_tags": ["top200", "drag", "tablet_space_radial_follow", "hand_tuned"],
+    "source_url": "https://setup.moe/u/2364",
+    "source_date": null,
+    "retrieved": "2026-10-30",
+    "confidence": "high",
+    "notes": "Identical radial values to player 8581210 (#208, PTK-470 55 x 43, https://setup.moe/u/1793): a shared hand-tuned preset. 2560x1440 480 Hz."
+  },
+  {
+    "id": "cupsizefan-devocub",
+    "player": "CUPSIZEFAN (osu! id 22274174; global #166)",
+    "tablet": "Wacom CTL-472",
+    "area_mm": {"width": 80, "height": 50},
+    "rotation_deg": null,
+    "filters": [
+      {"path": "TabletDriverFilters.Devocub.Antichatter", "enabled": true,
+       "settings": {"Latency": 8, "AntichatterStrength": 3, "AntichatterMultiplier": 1, "AntichatterOffsetX": 0, "AntichatterOffsetY": 1, "PredictionEnabled": false, "PredictionStrength": 1.1, "PredictionSharpness": 1, "PredictionOffsetX": 3, "PredictionOffsetY": 0.3, "Frequency": 1000}}
+    ],
+    "style_tags": ["top200", "drag", "devocub", "raw_input_on"],
+    "source_url": "https://setup.moe/u/1393",
+    "source_date": null,
+    "retrieved": "2026-10-30",
+    "confidence": "high",
+    "notes": "Plugin defaults except Latency 8 ms. 1920x1080 180 Hz."
+  },
+  {
+    "id": "origin-devocub-radial",
+    "player": "origin_ (osu! id 15095811; global #175)",
+    "tablet": "XP-Pen G640S",
+    "area_mm": {"width": 55, "height": 41},
+    "rotation_deg": null,
+    "filters": [
+      {"path": "TabletDriverFilters.Devocub.Antichatter", "enabled": true,
+       "settings": {"Latency": 4, "AntichatterStrength": 4, "AntichatterMultiplier": 1, "AntichatterOffsetX": 0, "AntichatterOffsetY": 0.5, "PredictionEnabled": false, "PredictionStrength": 1.1, "PredictionSharpness": 1, "PredictionOffsetX": 3, "PredictionOffsetY": 0.3, "Frequency": 1000}},
+      {"path": "RadialFollow.RadialFollowSmoothingTabletSpace", "enabled": true,
+       "settings": {"OuterRadius": 0.5, "InnerRadius": 0.3, "SmoothingCoefficient": 0.1, "SoftKneeScale": 0.2, "SmoothingLeakCoefficient": 0.1}}
+    ],
+    "style_tags": ["top200", "hybrid", "devocub", "tablet_space_radial_follow", "stacked_filters", "raw_input_on"],
+    "source_url": "https://setup.moe/u/1673",
+    "source_date": null,
+    "retrieved": "2026-10-30",
+    "confidence": "high",
+    "notes": "Non-Wacom example with two stacked smoothing filters. Filter order in OTD not recorded by setup.moe."
+  },
+  {
+    "id": "pabloniichan-chatter-exterminator",
+    "player": "Pabloniichan (osu! id 17117482; global #178)",
+    "tablet": "Wacom CTL-472",
+    "area_mm": {"width": 91, "height": 62},
+    "rotation_deg": null,
+    "filters": [
+      {"path": "Kuuube_s_Chatter_Exterminator.Kuuube_s_CHATTER_EXTERMINATOR_RAW", "enabled": true, "settings": {"Chatter_Extermination_Strength": 5}},
+      {"path": "Kuuube_s_Chatter_Exterminator.Kuuube_s_CHATTER_EXTERMINATOR_SMOOTH", "enabled": true, "settings": {"Chatter_Extermination_Strength": 6}}
+    ],
+    "style_tags": ["top200", "drag", "chatter_exterminator"],
+    "source_url": "https://setup.moe/u/2113",
+    "source_date": null,
+    "retrieved": "2026-10-30",
+    "confidence": "high",
+    "notes": "Strength 5 and 6 are also the setup.moe form defaults, so they may be untouched defaults; both enabled. 1920x1080 320 Hz."
+  },
+  {
+    "id": "exxotl-full-area-radial",
+    "player": "Exxotl (osu! id 15225729; global #178)",
+    "tablet": "Wacom CTL-672",
+    "area_mm": {"width": 216, "height": 135},
+    "rotation_deg": null,
+    "filters": [
+      {"path": "RadialFollow.RadialFollowSmoothingTabletSpace", "enabled": true,
+       "settings": {"OuterRadius": 1, "InnerRadius": 1, "SmoothingCoefficient": 0.95, "SoftKneeScale": 1, "SmoothingLeakCoefficient": 0}}
+    ],
+    "style_tags": ["top200", "full_area", "drag", "tablet_space_radial_follow"],
+    "source_url": "https://setup.moe/u/422",
+    "source_date": null,
+    "retrieved": "2026-10-30",
+    "confidence": "medium",
+    "notes": "Plugin defaults except InnerRadius 1 (= OuterRadius, i.e. a 1 mm deadzone). Possibly a placeholder entry."
+  },
+  {
+    "id": "kwal1976-tr-reverse",
+    "player": "Kwal1976 (osu! id 18659783; global #185)",
+    "tablet": "Wacom CTL-470",
+    "area_mm": {"width": 40, "height": 22},
+    "rotation_deg": null,
+    "filters": [
+      {"path": "TemporalResampler", "enabled": true,
+       "settings": {"frameShift": 0, "followRadius": 0, "latency": 0, "reverseSmoothing": 0.85, "extraFrames": true, "loggingEnabled": false}}
+    ],
+    "style_tags": ["top200", "drag", "temporal_resampler", "reverse_smoothing", "small_area"],
+    "source_url": "https://setup.moe/u/1772",
+    "source_date": null,
+    "retrieved": "2026-10-30",
+    "confidence": "high",
+    "notes": "Very small area on an old CTL-470. 2560x1440 360 Hz."
+  },
+  {
+    "id": "woojungx4-hover-devocub",
+    "player": "woojungx4 (osu! id 6567297; global #232)",
+    "tablet": "XP-Pen DECO MINI7 V2",
+    "area_mm": {"width": 190, "height": 135},
+    "rotation_deg": null,
+    "filters": [
+      {"path": "TabletDriverFilters.Devocub.Antichatter", "enabled": true,
+       "settings": {"Latency": 16, "AntichatterStrength": 9, "AntichatterMultiplier": 1, "AntichatterOffsetX": 0, "AntichatterOffsetY": 0, "PredictionEnabled": false, "PredictionStrength": 1.1, "PredictionSharpness": 1, "PredictionOffsetX": 3, "PredictionOffsetY": 0.3, "Frequency": 1000}}
+    ],
+    "style_tags": ["top300", "hover", "large_area", "devocub", "heavy_smoothing"],
+    "source_url": "https://setup.moe/u/325",
+    "source_date": null,
+    "retrieved": "2026-10-30",
+    "confidence": "high",
+    "notes": "Heaviest smoothing in the sample (16 ms, strength 9), on a large hover area; other filters listed but disabled."
+  },
+  {
+    "id": "pregnancy-hover-devocub",
+    "player": "Pregnancy (osu! id 10569381; global #379)",
+    "tablet": "Wacom PTH-860",
+    "area_mm": {"width": 280, "height": 137.5},
+    "rotation_deg": null,
+    "filters": [
+      {"path": "TabletDriverFilters.Devocub.Antichatter", "enabled": true,
+       "settings": {"Latency": 12, "AntichatterStrength": 3, "AntichatterMultiplier": 1, "AntichatterOffsetX": 0, "AntichatterOffsetY": 0, "PredictionEnabled": false, "PredictionStrength": 1.1, "PredictionSharpness": 1, "PredictionOffsetX": 3, "PredictionOffsetY": 0.3, "Frequency": 1000}}
+    ],
+    "style_tags": ["top400", "hover", "full_area", "devocub", "raw_input_on"],
+    "source_url": "https://setup.moe/u/1790",
+    "source_date": null,
+    "retrieved": "2026-10-30",
+    "confidence": "high",
+    "notes": "Full-width hover on a large tablet with 12 ms Devocub."
+  },
+  {
+    "id": "nixie-tr-devocub-prediction",
+    "player": "nixie (osu! id 11424586; global #398)",
+    "tablet": "Wacom CTL-472",
+    "area_mm": {"width": 53, "height": 35},
+    "rotation_deg": null,
+    "filters": [
+      {"path": "TemporalResampler", "enabled": true,
+       "settings": {"frameShift": 0, "followRadius": 0, "latency": 0, "reverseSmoothing": 1, "extraFrames": false, "loggingEnabled": false}},
+      {"path": "TabletDriverFilters.Devocub.Antichatter", "enabled": true,
+       "settings": {"Latency": 1, "AntichatterStrength": 20, "AntichatterMultiplier": 1, "AntichatterOffsetX": 0.7, "AntichatterOffsetY": 0.6, "PredictionEnabled": true, "PredictionStrength": 0.3, "PredictionSharpness": 0.7, "PredictionOffsetX": 2, "PredictionOffsetY": 0.3, "Frequency": 500}}
+    ],
+    "style_tags": ["top400", "drag", "temporal_resampler", "devocub", "prediction"],
+    "source_url": "https://setup.moe/u/2583",
+    "source_date": null,
+    "retrieved": "2026-10-30",
+    "confidence": "high",
+    "notes": "Only config in the sample with Devocub prediction on. Offsets 0.7/0.6 also used by Petit (#383, Latency 12, Strength 30, Multiplier 20, https://setup.moe/u/2450). 1920x1080 390 Hz, raw input on."
+  },
+  {
+    "id": "bossplays-stack",
+    "player": "BossPlays (osu! id 7341471; global #300)",
+    "tablet": "Wacom CTL-472",
+    "area_mm": {"width": 67, "height": 49},
+    "rotation_deg": null,
+    "filters": [
+      {"path": "Kuuube_s_Chatter_Exterminator.Kuuube_s_CHATTER_EXTERMINATOR_RAW", "enabled": true, "settings": {"Chatter_Extermination_Strength": 2}},
+      {"path": "TabletDriverFilters.Devocub.Antichatter", "enabled": true,
+       "settings": {"Latency": 1.4, "AntichatterStrength": 5, "AntichatterMultiplier": 1, "AntichatterOffsetX": 0, "AntichatterOffsetY": 1, "PredictionEnabled": false, "PredictionStrength": 1.1, "PredictionSharpness": 1, "PredictionOffsetX": 3, "PredictionOffsetY": 0.3, "Frequency": 500}},
+      {"path": "Kuuube_s_Chatter_Exterminator.Kuuube_s_CHATTER_EXTERMINATOR_SMOOTH", "enabled": true, "settings": {"Chatter_Extermination_Strength": 1}}
+    ],
+    "style_tags": ["top300", "drag", "stacked_filters", "low_latency"],
+    "source_url": "https://setup.moe/u/1894",
+    "source_date": null,
+    "retrieved": "2026-10-30",
+    "confidence": "high",
+    "notes": "Three light filters stacked. Order not recorded. 1920x1080 165 Hz."
+  },
+  {
+    "id": "btmc-full-area",
+    "player": "BTMC (osu! username BTMC)",
+    "tablet": "Wacom PTK-870",
+    "area_mm": {"width": 216, "height": 135},
+    "rotation_deg": null,
+    "filters": [],
+    "style_tags": ["well_known", "full_area", "filters_unknown"],
+    "source_url": "https://liquipedia.net/osu/BTMC",
+    "source_date": "2026-06-19",
+    "retrieved": "2026-10-30",
+    "confidence": "medium",
+    "notes": "Liquipedia table, empty ref; 'OpenTabletDriver v0.6.7'; X 108, Y 67.5 (centered full area). Raw input true per Liquipedia list."
+  },
+  {
+    "id": "vaxei-liquipedia-2023",
+    "player": "Vaxei (osu! username Vaxei)",
+    "tablet": "Wacom CTH-480",
+    "area_mm": {"width": 115, "height": 64.68},
+    "rotation_deg": 0,
+    "filters": [],
+    "style_tags": ["well_known", "large_area", "filters_unknown", "stale"],
+    "source_url": "https://liquipedia.net/osu/Vaxei",
+    "source_date": "2023-11-30",
+    "retrieved": "2026-10-30",
+    "confidence": "medium",
+    "notes": "Liquipedia, empty ref; X 57.5, Y 36.45; polling 125 Hz; shown as retired/inactive (gray) in the list."
+  },
+  {
+    "id": "rafis-liquipedia-2025",
+    "player": "Rafis (osu! username Rafis)",
+    "tablet": "Wacom PTK-470",
+    "area_mm": {"width": 95.5, "height": 56.965},
+    "rotation_deg": null,
+    "filters": [],
+    "style_tags": ["well_known", "filters_unknown"],
+    "source_url": "https://liquipedia.net/osu/Rafis",
+    "source_date": "2025-10-31",
+    "retrieved": "2026-10-30",
+    "confidence": "medium",
+    "notes": "Liquipedia, ref=player; X 67.66392, Y 29.5."
+  },
+  {
+    "id": "mathi-liquipedia-2023",
+    "player": "Mathi (osu! username Mathi)",
+    "tablet": "Wacom CTL-480",
+    "area_mm": {"width": 110, "height": 61.88},
+    "rotation_deg": 0,
+    "filters": [],
+    "style_tags": ["well_known", "filters_unknown", "stale"],
+    "source_url": "https://liquipedia.net/osu/Mathi",
+    "source_date": "2023-11-06",
+    "retrieved": "2026-10-30",
+    "confidence": "medium",
+    "notes": "Liquipedia, empty ref; 'OpenTabletDriver v0.6.3.0'; X 74.5, Y 38.79."
+  },
+  {
+    "id": "enri-2026",
+    "player": "enri (osu! id 8640970; global #22)",
+    "tablet": "Wacom CTL-472",
+    "area_mm": {"width": 60, "height": 48},
+    "rotation_deg": 0,
+    "filters": [],
+    "style_tags": ["top30", "filters_unknown"],
+    "source_url": "https://liquipedia.net/osu/Enri",
+    "source_date": "2026-08-14",
+    "retrieved": "2026-10-30",
+    "confidence": "medium",
+    "notes": "Liquipedia, ref=player, 'OpenTabletDriver v0.6.7', X 30, Y 24 (top-left corner). setup.moe (https://setup.moe/u/1039) instead says 71 x 55, hybrid, 2368x1332 480 Hz, no filters listed. Profile notes he plays tablet on a second account."
+  },
+  {
+    "id": "xootynator-full-area",
+    "player": "xootynator (osu! id 3717598; global #71)",
+    "tablet": "Wacom CTL-680",
+    "area_mm": {"width": 216, "height": 135},
+    "rotation_deg": 0,
+    "filters": [],
+    "style_tags": ["well_known", "full_area", "filters_unknown", "raw_input_off"],
+    "source_url": "https://liquipedia.net/osu/List_of_player_tablet_settings",
+    "source_date": null,
+    "retrieved": "2026-10-30",
+    "confidence": "medium",
+    "notes": "Liquipedia list: raw input false, sensitivity 1. Own profile: 'THANK YOU STAN FULL AREA'."
+  },
+  {
+    "id": "forum-screen-space-radial-2024",
+    "player": "yellowbadbeast (osu! forum user, not a ranked notable)",
+    "tablet": null,
+    "area_mm": null,
+    "rotation_deg": null,
+    "filters": [
+      {"path": "RadialFollow.RadialFollowSmoothingScreenSpace", "enabled": true, "settings": {"OuterRadius": 20}}
+    ],
+    "style_tags": ["community_advice", "screen_space_radial_follow"],
+    "source_url": "https://osu.ppy.sh/community/forums/topics/1971762",
+    "source_date": "2024-09-03",
+    "retrieved": "2026-10-30",
+    "confidence": "low",
+    "notes": "Forum advice to a new XP-Pen G430S user: screen-coordinates Radial Follow with outer radius 20 px, 'adjust it until you like it'. Other values not stated. Same thread suggests Reconstructor EMA weight 0.15 for that tablet."
+  }
+]

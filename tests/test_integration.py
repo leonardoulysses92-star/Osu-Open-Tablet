@@ -25,8 +25,8 @@ from typing import Any, Callable
 from osu_tablet_assistant.engine import recommend
 from osu_tablet_assistant.gui import i18n, live_tests
 from osu_tablet_assistant.gui.session import (
-    BASELINE_KINDS, CANDIDATE_KINDS, MAX_REFINE_ROUNDS, STEP_ORDER, ConfirmationRequired, Services,
-    Session, SessionError, Step)
+    BASELINE_KINDS, CANDIDATE_KINDS, COMMUNITY_CANDIDATES, MAX_REFINE_ROUNDS, STEP_ORDER,
+    ConfirmationRequired, Services, Session, SessionError, Step)
 from osu_tablet_assistant.knowledge.filters import load_catalog
 from osu_tablet_assistant.models import (ApplyResult, CandidateResult, DisplaySpec, FilterConfig,
                                          MapPreference, MetricsReport, PenSample, PlayStyle,
@@ -167,15 +167,16 @@ class Harness:
         self.pen = FakePen(self.otd, self.original)
         services = Services(find_config_dir=lambda: self.config, find_install_dir=lambda: None,
                             make_controller=self.otd.make, run_test=self.pen,
-                            detect_display=lambda: DISPLAY, desktop_origin=lambda: (0.0, 0.0))
+                            detect_display=lambda: DISPLAY, desktop_origin=lambda: (0.0, 0.0),
+                            config_locations=lambda **_kw: [])   # never scan the real machine
         for name in ("backup_settings", "write_settings", "save_preset"):
             setattr(services, name, self._recorded(name, getattr(services, name)))
         self.session = Session(services, dry_run=dry_run)
 
     def _recorded(self, name: str, real: Callable[..., Any]) -> Callable[..., Any]:
-        def call(*args: Any) -> Any:
+        def call(*args: Any, **kwargs: Any) -> Any:
             self.events.append(name)
-            return real(*args)
+            return real(*args, **kwargs)
         call.__name__ = name
         return call
 
@@ -245,7 +246,15 @@ class ConfirmedJourneyTests(unittest.TestCase):
         self.assertEqual(h.events, [])
         self.assertEqual(h.settings_bytes(), h.original_bytes)
         ids = [c.id for c in s.candidates]
-        self.assertEqual(ids, ["no-filter", "low-latency", "balanced", "smooth", "keep-current"])
+        # Engine options, then the closest usable community presets (session.COMMUNITY_CANDIDATES), then
+        # the current profile as reference.
+        self.assertEqual(ids[:4], ["no-filter", "low-latency", "balanced", "smooth"])
+        self.assertEqual(ids[-1], "keep-current")
+        community = ids[4:-1]
+        self.assertEqual(len(community), COMMUNITY_CANDIDATES)
+        self.assertTrue(all(i.startswith("community:") for i in community))
+        for cid in community:   # only presets whose plugins are installed
+            self.assertLessEqual({f.path for f in s.candidate(cid).changes.filters}, s.filter_paths)
 
         # Generated candidates: Frequency untouched, catalog values only, areas centered.
         catalog = load_catalog()
@@ -505,7 +514,8 @@ class LocaleCoverageTests(unittest.TestCase):
             self.assertInBoth(key, params)
 
     def test_otd_error_params_format(self) -> None:
-        samples = {"path": "C:\\x\\settings.json", "detail": "boom", "name": "a?b"}
+        samples = {"path": "C:\\x\\settings.json", "detail": "boom", "name": "a?b",
+                   "version": "0.6.7", "recommended": "0.6.8.1"}   # otd.notice.old_version
         for key in [k for k in self.en if k.startswith("otd.")]:
             self.assertInBoth(key, samples)
 

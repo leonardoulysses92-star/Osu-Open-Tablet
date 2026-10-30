@@ -10,5 +10,8 @@
   "otd.error.settings_not_object": "The OpenTabletDriver settings file {path} does not have the expected format.",
   "otd.error.config_dir_missing": "OpenTabletDriver configuration folder not found: {path}",
   "otd.error.preset_name_invalid": "\"{name}\" cannot be used as a preset name. Avoid the characters < > : \" / \\ | ? * and a trailing dot.",
-  "otd.error.preset_exists": "A preset with that name already exists: {path}"
+  "otd.error.preset_exists": "A preset with that name already exists: {path}",
+  "otd.notice.old_version": "Information: your settings were written by OpenTabletDriver {version}. Version {recommended} or newer is recommended when you use interpolator filters on Windows (0.6.8 keeps aux buttons and touch working with them, 0.6.8.1 fixes a daemon crash of 0.6.8). Updating is your choice; nothing changes if you don't.",
+  "otd.location.installed": "Installed OpenTabletDriver: {path}",
+  "otd.location.portable": "Portable OpenTabletDriver: {path}"
 }

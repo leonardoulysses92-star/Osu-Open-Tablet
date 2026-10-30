@@ -86,6 +86,7 @@ class Fixture:
             list_known_tablets=lambda install: tablet_db.builtin_tablets(),
             detect_display=lambda: DisplaySpec(1920, 1080, 960, 540),
             desktop_origin=lambda: (0.0, 0.0),
+            config_locations=lambda **_kw: [],
         )
         self.session = Session(self.services, dry_run=dry_run)
 

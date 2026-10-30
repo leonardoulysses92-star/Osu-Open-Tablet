@@ -311,5 +311,63 @@ class LocaleTest(unittest.TestCase):
         self.assertEqual(used - set(es), set())
 
 
+class OutputFolderTest(TempConfigCase):
+    """Saving full settings documents into a user-chosen folder (like Documents/opentablet)."""
+
+    def test_destination_and_backup_on_overwrite(self) -> None:
+        out = self.dir / "opentablet"
+        out.mkdir()
+        (out / "Osu.json").write_text(json.dumps(sample()), encoding="utf-8")
+        with self.assertRaises(sio.OtdSettingsError) as ctx:
+            sio.save_preset(self.dir, "Osu", {"x": 1}, destination=out)
+        self.assertEqual(ctx.exception.key, "otd.error.preset_exists")
+        path = sio.save_preset(self.dir, "Osu", sample(), overwrite=True, destination=out)
+        self.assertEqual(path, out / "Osu.json")
+        (backup,) = (out / "Backup").glob("Osu-*.json")
+        self.assertEqual(json.loads(backup.read_text(encoding="utf-8")), sample())
+        self.assertTrue(sio.is_full_settings(json.loads(path.read_text(encoding="utf-8"))))
+        self.assertFalse((self.dir / "Presets").exists())          # default folder untouched
+        new = sio.save_preset(self.dir, "Wacom CTL-472 2026-10-30 14-00-00", sample(), destination=out)
+        self.assertEqual(new.parent, out)
+
+    def test_full_settings_detection(self) -> None:
+        self.assertTrue(sio.is_full_settings(sample()))
+        self.assertFalse(sio.is_full_settings({"Profiles": []}))
+        self.assertFalse(sio.is_full_settings([]))
+
+    def test_version_notice(self) -> None:
+        self.assertEqual(sio.otd_version(sample()), (0, 6, 7))
+        key, params = sio.version_notice(sample())
+        self.assertEqual((key, params["version"], params["recommended"]),
+                         ("otd.notice.old_version", "0.6.7", "0.6.8.1"))
+        for rev in ("0.6.8.1", "0.6.9", "0.7"):
+            self.assertIsNone(sio.version_notice({"Revision": rev}), rev)
+        for bad in (None, {}, {"Revision": "abc"}, {"Revision": 7}):
+            self.assertIsNone(sio.version_notice(bad))
+
+    def test_portable_install_is_a_config_location(self) -> None:
+        home = self.dir / "home"
+        portable = home / "Documents" / "opentablet"
+        (portable / "userdata").mkdir(parents=True)
+        (portable / "convert_to_portable.bat").write_text("@echo off", encoding="utf-8")
+        (portable / "Osu.json").write_text(json.dumps(sample()), encoding="utf-8")
+        (portable / "notes.json").write_text("{}", encoding="utf-8")
+        (portable / "userdata" / sio.SETTINGS_FILE).write_text(json.dumps(sample()), encoding="utf-8")
+        local = self.dir / "local"
+        (local / "OpenTabletDriver").mkdir(parents=True)
+        locations = sio.config_locations("Windows", {"LOCALAPPDATA": str(local)}, home)
+        self.assertEqual([(loc.kind, loc.path) for loc in locations],
+                         [("installed", local / "OpenTabletDriver"), ("portable", portable / "userdata")])
+        self.assertEqual({p.name for p in locations[1].settings_files}, {"Osu.json", sio.SETTINGS_FILE})
+        self.assertTrue(sio.is_portable_dir(portable, "Windows"))
+        self.assertFalse(sio.is_portable_dir(local, "Windows"))
+        bare = self.dir / "bare"
+        bare.mkdir()
+        (bare / "OpenTabletDriver.Daemon.exe").write_bytes(b"")
+        (bare / "Osu.json").write_text(json.dumps(sample()), encoding="utf-8")
+        (loc,) = sio.config_locations("Windows", {}, self.dir / "nohome", extra=[bare])
+        self.assertEqual((loc.kind, loc.path), ("portable", bare))
+
+
 if __name__ == "__main__":
     unittest.main()

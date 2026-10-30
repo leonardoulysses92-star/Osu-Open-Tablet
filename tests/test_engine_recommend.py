@@ -75,7 +75,8 @@ class GenerateTests(unittest.TestCase):
             self.assertIn("engine.reason.frequency_default", _keys(cands[cid]))
         self.assertEqual(latencies, {"low-latency": 4.0, "balanced": 10.0, "smooth": 20.0})
 
-    def test_frequency_left_at_default_except_saturn(self) -> None:
+    def test_frequency_always_left_at_default_saturn_included(self) -> None:
+        # 2026-10-30 audit: "Saturn Frequency = report rate" is doubtful, so it is no longer forced.
         catalog = load_catalog()
         for tablet in (TABLET, FAST_TABLET):
             for cand in generate_candidates(tablet, DISPLAY_240, UserPreferences(notices_jitter=True),
@@ -84,10 +85,9 @@ class GenerateTests(unittest.TestCase):
                     param = catalog[fc.path].param("Frequency")
                     if param is not None:
                         self.assertEqual(fc.settings["Frequency"], param.default, fc.path)
-        saturn = rec._make_filter(catalog[rec.SATURN_MULTI], {}, 266.0)
-        self.assertEqual(saturn.settings["Frequency"], 266.0)
-        for path in (rec.HAWKU, rec.ANTICHATTER, rec.RESAMPLER):
-            self.assertEqual(rec._make_filter(catalog[path], {}, 266.0).settings["Frequency"], 1000.0)
+        for path in (rec.SATURN_MULTI, rec.HAWKU, rec.ANTICHATTER, rec.RESAMPLER):
+            self.assertEqual(rec._make_filter(catalog[path], {}).settings["Frequency"], 1000.0)
+        self.assertFalse(hasattr(rec, "FREQUENCY_IS_REPORT_RATE"))
 
     def test_priority_changes_strength(self) -> None:
         def balanced_latency(**kw) -> float:
@@ -127,7 +127,9 @@ class GenerateTests(unittest.TestCase):
 
     def test_resampler_for_fast_monitor_or_low_rate(self) -> None:
         cands = _by_id(generate_candidates(TABLET, DISPLAY_240, UserPreferences(), ALL, CLEAN, None))
-        self.assertEqual(_paths(cands["balanced"])[0], rec.RESAMPLER)
+        # Research order: smoothing first, resampler after it (OTD runs the list in order).
+        self.assertEqual(_paths(cands["balanced"]), [rec.RADIAL_TABLET, rec.RESAMPLER])
+        self.assertIn("engine.reason.prediction_policy_unknown", _keys(cands["balanced"]))
         cands = _by_id(generate_candidates(TABLET, DISPLAY_60, UserPreferences(), ALL, CLEAN, None))
         self.assertNotIn(rec.RESAMPLER, _paths(cands["balanced"]))
         slow = CLEAN + [MetricsReport("rate", 100, 1.0, effective_rate_hz=60.0)]
@@ -143,7 +145,7 @@ class GenerateTests(unittest.TestCase):
 
     def test_values_in_bounds_ordered_and_deterministic(self) -> None:
         catalog = load_catalog()
-        order = {p: i for i, p in enumerate(rec.CHAIN_ORDER)}
+        order = {p: i for i, p in enumerate(rec.RESEARCH_ORDER)}
         for tablet, display, baseline, prio, skill, jitter in itertools.product(
                 (TABLET, FAST_TABLET, TabletSpec("zero-rate", 100, 60, 0.0)),
                 (DISPLAY_60, DISPLAY_240), (None, NOISY, CLEAN), Priority, SkillLevel,

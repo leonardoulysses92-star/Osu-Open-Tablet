@@ -200,6 +200,21 @@ class OtdController:
             return ApplyResult(True, "rpc", "otd.apply.ok_rpc", "\n".join(details))
         return self._fallback(settings, details, "otd.apply.manual_preset")
 
+    def apply_rpc(self, settings: dict, timeout_s: float | None = None) -> ApplyResult:
+        """Fast live apply: one ``SetSettings`` over the pipe, no Console, no preset fallback.
+
+        Meant for repeated small changes (companion mode). Like :meth:`apply`
+        it is in-memory only: the daemon never writes ``settings.json``.
+        ``timeout_s`` overrides ``rpc_timeout_s`` for this call.
+        """
+        if not isinstance(settings, dict):
+            raise TypeError("settings must be a dict")
+        if not self.is_daemon_running():
+            return ApplyResult(False, "none", "livetune.error.daemon", "daemon: pipe not found")
+        ok, detail = self._apply_rpc(settings, timeout_s)
+        return ApplyResult(ok, "rpc" if ok else "none", "otd.apply.ok_rpc" if ok else "livetune.error.rpc",
+                           detail)
+
     def _apply_console(self, settings: dict) -> tuple[bool, str]:
         exe = self.console_path
         if exe is None:
@@ -220,7 +235,8 @@ class OtdController:
         failed = proc.returncode != 0 or any(m in output for m in CONSOLE_FAILURE_MARKERS)
         return not failed, f"console: exit {proc.returncode}; output: {output or '(none)'}"
 
-    def _apply_rpc(self, settings: dict) -> tuple[bool, str]:
+    def _apply_rpc(self, settings: dict, timeout_s: float | None = None) -> tuple[bool, str]:
+        timeout = self.rpc_timeout_s if timeout_s is None else timeout_s
         outcome: dict[str, Any] = {}
 
         def worker() -> None:
@@ -238,10 +254,10 @@ class OtdController:
         # abandoned (daemon thread) when the deadline passes.
         thread = threading.Thread(target=worker, name="otd-rpc", daemon=True)
         thread.start()
-        thread.join(self.rpc_timeout_s)
+        thread.join(timeout)
         if outcome.get("ok"):
             return True, "rpc: SetSettings ok"
-        return False, f"rpc: {outcome.get('error', f'timed out after {self.rpc_timeout_s}s')}"
+        return False, f"rpc: {outcome.get('error', f'timed out after {timeout}s')}"
 
     def _fallback(self, settings: dict, details: list[str], key: str) -> ApplyResult:
         """Save the preset for manual loading; ``method="none"`` if even that fails."""

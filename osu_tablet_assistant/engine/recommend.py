@@ -14,7 +14,7 @@ from typing import Any, Sequence
 
 from ..knowledge.filters import FilterParam, FilterSpec, load_catalog
 from ..models import (Candidate, CandidateResult, DisplaySpec, FilterConfig, MetricsReport,
-                      Priority, ProfileChanges, ProfileInfo, Reason, Rect, SkillLevel,
+                      PluginPolicy, Priority, ProfileChanges, ProfileInfo, Reason, Rect, SkillLevel,
                       TabletSpec, UserPreferences)
 from .area import recommend_area
 
@@ -29,22 +29,40 @@ SATURN_ROUNDING = "Saturn.AreaRoundingDFC"
 CHATTER_RAW = "Kuuube_s_Chatter_Exterminator.Kuuube_s_CHATTER_EXTERMINATOR_RAW"
 CHATTER_SMOOTH = "Kuuube_s_Chatter_Exterminator.Kuuube_s_CHATTER_EXTERMINATOR_SMOOTH"
 CHATTER_STRENGTH = "Chatter_Extermination_Strength"
+RECONSTRUCTOR = "VoiDPlugins.Filter.Reconstructor"
+SPECTRAL = "TrajectoryEigenFilter.OTD.TrajectoryEigenFilterPlugin"
+SATURN_HRRNC = "Saturn.HRRNC"
+BEZIER = "BezierInterpolator.BezierInterp"
+SCUFFED = "ScuffedInterpolator.ScuffedInterp"
+FRENET = "FrenetSerretFramePredictor.FrenetSerretFramePredictor"
+HOVER_LIMITER = "Hover_Distance_Limiter.Hover_Distance_Limiter"
 
-# Chain order. OTD runs elements by pipeline stage (raw -> pre-transform ->
-# post-transform) and keeps list order inside a stage, so this mirrors execution:
-# 1. Temporal Resampler is a Raw-stage element: it needs untouched reports to
-#    time them and predict, so it comes first.
-# 2. Noise/chatter removal before smoothing: a smoother spreads a noise spike
+# Order in which the engine writes a NEW chain (docs/research/filters.md §0, §3).
+# In OTD 0.6 ``PipelinePosition.Raw`` is an alias of PreTransform, so inside the
+# pre-transform group filters run exactly in the order of the profile's Filters
+# list: RESEARCH_ORDER *is* the execution order. A user's existing chain is never
+# re-sorted by stage (tune_only keeps it as it is).
+# 1. Report gating (Hover Distance Limiter, OTD 0.6.8 Internal stage) first.
+# 2. Noise compensation and reconstruction before anything else (HRRNC tooltip
+#    "should probably be first", Spectral Reconstructor sorts itself first,
+#    Reconstructor undoes hardware smoothing on the raw reports).
+# 3. Noise/chatter removal before smoothing: a smoother spreads a noise spike
 #    over many frames, while removing it first lets the smoother use less latency.
-# 3. Synchronous smoothers (Radial Follow) before timer-driven ones (Hawku,
+# 4. Synchronous smoothers (Radial Follow) before timer-driven ones (Hawku,
 #    Devocub): an async element re-emits frames at its own Frequency, so any
 #    filter after it would process interpolated frames instead of reports.
-# 4. Screen-space (post-transform) filters last; area reshaping at the very end.
+# 5. Resamplers after smoothing (public osu! preset order: CHATTER_SMOOTH ->
+#    Radial Follow -> Temporal Resampler).
+# 6. Screen-space (post-transform) filters last; area reshaping at the very end.
+RESEARCH_ORDER = (HOVER_LIMITER, SATURN_HRRNC, SPECTRAL, RECONSTRUCTOR, NOISE_REDUCTION, CHATTER_SMOOTH,
+                  SATURN_MULTI, RADIAL_TABLET, ANTICHATTER, HAWKU, RESAMPLER, SCUFFED, CHATTER_RAW,
+                  RADIAL_SCREEN, BEZIER, FRENET, SATURN_ROUNDING)
+# DEPRECATED pre-audit order (Temporal Resampler first, as if "raw" ran before
+# "pre"). Kept unchanged only because engine.adapt (companion mode, another
+# workstream) imports it; new code uses RESEARCH_ORDER.
 CHAIN_ORDER = (RESAMPLER, NOISE_REDUCTION, CHATTER_SMOOTH, SATURN_MULTI, RADIAL_TABLET,
                ANTICHATTER, HAWKU, CHATTER_RAW, RADIAL_SCREEN, SATURN_ROUNDING)
 ASYNC_SMOOTHERS = (HAWKU, ANTICHATTER)
-# Filters whose ``Frequency`` property is the tablet report rate (see _make_filter).
-FREQUENCY_IS_REPORT_RATE = (SATURN_MULTI,)
 NOISE_PREFERENCE = (CHATTER_SMOOTH, NOISE_REDUCTION, CHATTER_RAW)
 # Radial Follow first where latency matters: it never delays a jump by more
 # than its outer radius. Devocub first for "smooth": it adds extra smoothing
@@ -97,10 +115,23 @@ def _filter_latency_ms(fc: FilterConfig, rate_hz: float, mm_per_px: float) -> fl
     * Noise Reduction: output waits until the pen leaves DistanceThreshold.
     * Chatter Exterminator / Saturn Multifilter: no documented figure; assume
       half a report interval ("low latency" per their authors).
-    * Saturn Area Rounding: geometric remap, no delay.
+    * Saturn Area Rounding, Hover Distance Limiter: remap / gate, no delay.
+    * Reconstructor: reverse EMA, removes delay rather than adding it -> 0.
+    * Spectral Reconstructor: ``LatencySamples`` reports (README).
+    * Bezier Interpolator: about one report interval (code estimate in the audit).
+    * Scuffed Interpolator: up to one interval scaled by its amount (estimate).
+    * Saturn HRRNC, Frenet-Serret predictor: no figure -> unknown.
     """
     s = fc.settings
     interval = 1000.0 / rate_hz
+    if fc.path in (SATURN_ROUNDING, HOVER_LIMITER, RECONSTRUCTOR):
+        return 0.0
+    if fc.path == SPECTRAL:
+        return _num(s, "LatencySamples", 4.0) * interval
+    if fc.path == BEZIER:
+        return interval
+    if fc.path == SCUFFED:
+        return min(max(_num(s, "_getSetScuffedInterpAmount", 0.5), 0.0), 1.0) * interval
     if fc.path == HAWKU:
         return _num(s, "Latency", 2.0)
     if fc.path == ANTICHATTER:
@@ -115,12 +146,10 @@ def _filter_latency_ms(fc: FilterConfig, rate_hz: float, mm_per_px: float) -> fl
         return _num(s, "DistanceThreshold", 0.5) / TYPICAL_SPEED_MM_PER_MS
     if fc.path in (CHATTER_RAW, CHATTER_SMOOTH, SATURN_MULTI):
         return 0.5 * interval
-    if fc.path == SATURN_ROUNDING:
-        return 0.0
     return None
 
 
-def _chain_latency(filters: Sequence[FilterConfig], rate_hz: float,
+def chain_latency(filters: Sequence[FilterConfig], rate_hz: float,
                    mm_per_px: float) -> tuple[float, tuple[str, ...]]:
     """Sum of estimates for enabled filters, plus the paths with no estimate."""
     total, unknown = 0.0, []
@@ -226,29 +255,45 @@ def _smoother_settings(path: str, level: float, ctx: _Context,
             "SoftKneeScale": 1.0, "SmoothingLeakCoefficient": 0.0}
 
 
-def _enforce_constraints(path: str, settings: dict[str, Any]) -> None:
+def enforce_constraints(path: str, settings: dict[str, Any]) -> None:
     """Cross-parameter rules the catalog bounds cannot express."""
-    if path in (RADIAL_TABLET, RADIAL_SCREEN):
+    if path in (RADIAL_TABLET, RADIAL_SCREEN) and "InnerRadius" in settings and "OuterRadius" in settings:
         settings["InnerRadius"] = min(settings["InnerRadius"], settings["OuterRadius"])
 
 
-def _make_filter(spec: FilterSpec, overrides: dict[str, Any], rate_hz: float) -> FilterConfig:
+def _make_filter(spec: FilterSpec, overrides: dict[str, Any]) -> FilterConfig:
     """Full settings (defaults + overrides), clamped.
 
-    ``Frequency`` means different things per plugin: Hawku/Devocub use it as
-    their own async timer rate (default 1000 Hz, the Devocub tooltip says not
-    to change it) and Temporal Resampler only logs it, so those keep the
-    catalog default. Only Saturn Multifilter reads it as the tablet's report
-    rate (expected report interval), so only there it is set to ``rate_hz``.
+    ``Frequency`` always keeps the catalog default (1000 Hz): for Hawku,
+    Devocub, Bezier and the other async filters it is the filter's own timer
+    rate, Temporal Resampler only logs it, and the old "Saturn Multifilter
+    Frequency = report rate" rule was dropped (the 2026-10-30 audit found that
+    MultifilterCore compares it with the measured *update* interval and no
+    Saturn doc asks for the report rate).
     """
     settings = spec.defaults()
     settings.update(overrides)
-    if spec.path in FREQUENCY_IS_REPORT_RATE and spec.param("Frequency") is not None:
-        settings["Frequency"] = rate_hz
     for param in spec.params:
         settings[param.name] = param.clamp(settings[param.name])
-    _enforce_constraints(spec.path, settings)
+    enforce_constraints(spec.path, settings)
     return FilterConfig(path=spec.path, enabled=True, settings=settings)
+
+
+def policy_filters(available_filters: set[str], prefs: UserPreferences, current: ProfileInfo | None,
+                   catalog: dict[str, FilterSpec]) -> set[str]:
+    """Paths the engine may put into a candidate under ``prefs.plugin_policy``.
+
+    * tune_only: only the filters enabled in the current profile (nothing is added);
+    * installed / allow_new: detected plugins (``allow_new`` adds *suggestions*
+      elsewhere, never unmeasurable candidates).
+    Filters with ``auto_recommend`` False (prediction / input-assist risk, not
+    smoothing filters) are never picked.
+    """
+    if prefs.plugin_policy is PluginPolicy.TUNE_ONLY:
+        paths = {f.path for f in (current.filters if current else ()) if f.enabled}
+    else:
+        paths = set(available_filters)
+    return {p for p in paths if p in catalog and catalog[p].auto_recommend}
 
 
 def _build_filtered(cid: str, ctx: _Context, available: set[str],
@@ -293,16 +338,22 @@ def _build_filtered(cid: str, ctx: _Context, available: set[str],
             reasons.append(Reason("engine.reason.smoother_added",
                                   {"filter": catalog[smoother].display_name}))
 
-    filters = tuple(_make_filter(catalog[p], chain[p], ctx.rate_hz)
-                    for p in CHAIN_ORDER if p in chain)
+    filters = tuple(_make_filter(catalog[p], chain[p]) for p in RESEARCH_ORDER if p in chain)
     if not filters:
         reasons.append(Reason("engine.reason.nothing_to_add"))
     else:
-        kept = [catalog[f.path].display_name for f in filters
-                if f.path not in FREQUENCY_IS_REPORT_RATE and catalog[f.path].param("Frequency")]
+        kept = [catalog[f.path].display_name for f in filters if catalog[f.path].param("Frequency")]
         if kept:   # guides often say to set it to the report rate: explain why we do not
             reasons.append(Reason("engine.reason.frequency_default", {"filters": ", ".join(kept)}))
+        reasons += prediction_notes(filters)
     return filters, reasons
+
+
+def prediction_notes(filters: Sequence[FilterConfig]) -> list[Reason]:
+    """Factual note when a chain uses a prediction setting whose osu! policy status is unknown."""
+    predicting = [f for f in filters if f.enabled and f.path in (RESAMPLER, SATURN_MULTI)
+                  and _num(f.settings, "frameShift", 0.0) > 0]
+    return [Reason("engine.reason.prediction_policy_unknown")] if predicting else []
 
 
 def _recommended_area(tablet: TabletSpec, display: DisplaySpec, prefs: UserPreferences,
@@ -327,45 +378,125 @@ def _recommended_area(tablet: TabletSpec, display: DisplaySpec, prefs: UserPrefe
 
 def generate_candidates(tablet: TabletSpec, display: DisplaySpec, prefs: UserPreferences,
                         available_filters: set[str], baseline: list[MetricsReport] | None,
-                        current: ProfileInfo | None) -> list[Candidate]:
-    """``no-filter``, ``low-latency``, ``balanced``, ``smooth`` (+ ``keep-current``).
+                        current: ProfileInfo | None, community: Sequence[Any] | None = None
+                        ) -> list[Candidate]:
+    """``no-filter``, ``low-latency``, ``balanced``, ``smooth`` (+ community, + ``keep-current``).
 
     All generated candidates share the recommended area so that measurements
     compare filters only. Unknown paths in ``available_filters`` are ignored.
+    ``prefs.plugin_policy`` decides which filters may appear (see
+    :func:`policy_filters`); with ``tune_only`` the generated options keep the
+    current chain and change one parameter (``tune-less`` / ``tune-more``).
+    ``community`` (``knowledge.presets.CommunityPreset`` items, already chosen
+    by the caller, e.g. with ``engine.community.select_presets``) become
+    ``community:<id>`` candidates; presets whose plugins the policy does not
+    allow are skipped.
     """
+    from . import community as comm   # community imports this module
+
     catalog = load_catalog()
-    available = {p for p in available_filters if p in catalog}
+    available = policy_filters(available_filters, prefs, current, catalog)
     area, area_reasons = _recommended_area(tablet, display, prefs, current)
     ctx = _context(tablet, display, prefs, area, baseline)
     base = ProfileChanges(
         tablet_area=area,
         display_area=Rect(display.width_px, display.height_px, display.offset_x, display.offset_y),
         lock_aspect_ratio=True, filters=())
+    tune_only = prefs.plugin_policy is PluginPolicy.TUNE_ONLY
 
-    candidates = [Candidate(
-        id="no-filter", label_key="engine.candidate.no-filter.label",
-        summary_key="engine.candidate.no-filter.summary", changes=base,
-        reasons=(Reason("engine.reason.candidate_no-filter"),) + area_reasons,
-        est_added_latency_ms=0.0, tags=("baseline",))]
-    for cid in FILTERED_IDS:
-        filters, reasons = _build_filtered(cid, ctx, available, catalog)
-        latency, _ = _chain_latency(filters, ctx.rate_hz, ctx.mm_per_px)
-        reasons.append(Reason("engine.reason.latency_estimate", {"ms": latency}))
+    candidates: list[Candidate] = []
+    if not tune_only:
         candidates.append(Candidate(
-            id=cid, label_key=f"engine.candidate.{cid}.label",
-            summary_key=f"engine.candidate.{cid}.summary",
-            changes=replace(base, filters=filters),
-            reasons=(Reason(f"engine.reason.candidate_{cid}"),) + ctx.reasons
-            + tuple(reasons) + area_reasons,
-            est_added_latency_ms=latency, tags=(cid,)))
+            id="no-filter", label_key="engine.candidate.no-filter.label",
+            summary_key="engine.candidate.no-filter.summary", changes=base,
+            reasons=(Reason("engine.reason.candidate_no-filter"),) + area_reasons,
+            est_added_latency_ms=0.0, tags=("baseline",)))
+        for cid in FILTERED_IDS:
+            filters, reasons = _build_filtered(cid, ctx, available, catalog)
+            latency, _ = chain_latency(filters, ctx.rate_hz, ctx.mm_per_px)
+            reasons.append(Reason("engine.reason.latency_estimate", {"ms": latency}))
+            candidates.append(Candidate(
+                id=cid, label_key=f"engine.candidate.{cid}.label",
+                summary_key=f"engine.candidate.{cid}.summary",
+                changes=replace(base, filters=filters),
+                reasons=(Reason(f"engine.reason.candidate_{cid}"),) + ctx.reasons
+                + tuple(reasons) + area_reasons,
+                est_added_latency_ms=latency, tags=(cid,)))
+    else:
+        candidates += _tune_candidates(current, ctx, base, catalog, area_reasons)
+    for preset in community or ():
+        if comm.unusable_reason(preset, prefs.plugin_policy, set(available_filters), current, tablet,
+                                catalog) is None:
+            candidates.append(comm.community_candidate(preset, base, catalog, ctx.rate_hz, ctx.mm_per_px,
+                                                       prefs.plugin_policy, current))
     if current is not None:
         candidates.append(_keep_current(current, ctx))
+    if not candidates:   # tune_only without a profile: nothing of the user's to tune
+        candidates.append(Candidate(
+            id="no-filter", label_key="engine.candidate.no-filter.label",
+            summary_key="engine.candidate.no-filter.summary", changes=base,
+            reasons=(Reason("engine.reason.tune_only_no_profile"),) + area_reasons,
+            est_added_latency_ms=0.0, tags=("baseline",)))
     return candidates
+
+
+TUNE_FACTORS = (("less", 0.75), ("more", 1.33))   # one step down / up of the main knob
+
+
+def _tune_candidates(current: ProfileInfo | None, ctx: _Context, base: ProfileChanges,
+                     catalog: dict[str, FilterSpec], area_reasons: tuple[Reason, ...]) -> list[Candidate]:
+    """tune_only: the current chain (same filters, order and on/off) with ONE knob moved.
+
+    The knob is the most influential one present (``KNOBS`` order); a second
+    parameter only changes when a constraint forces it (Radial Follow inner
+    radius <= outer radius), and every change is listed as old -> new.
+    """
+    from .community import change_reason
+
+    if current is None:
+        return []
+    knob = next(((i, catalog[path], catalog[path].param(name))
+                 for path, name in KNOBS for i, fc in enumerate(current.filters)
+                 if fc.path == path and fc.enabled and path in catalog
+                 and catalog[path].param(name) is not None), None)
+    if knob is None:
+        return []
+    index, spec, param = knob
+    fc = current.filters[index]
+    raw = fc.settings.get(param.name, param.default)
+    # The user's real value (bounds only, no step rounding): it is what the "old" in the reason shows.
+    old = float(raw) if isinstance(raw, (int, float)) and not isinstance(raw, bool) and math.isfinite(raw) \
+        else float(param.default)
+    old = min(max(old, float(param.min)), float(param.max))
+    out = []
+    for direction, factor in TUNE_FACTORS:
+        new = float(param.clamp(old * factor if old > 0 else
+                                (param.step or 0.0) * (1 if direction == "more" else 0)))
+        if abs(new - old) <= (param.step or 1e-6) / 2:
+            continue
+        settings = dict(fc.settings)
+        settings[param.name] = param.clamp(new)
+        before = dict(settings)
+        enforce_constraints(spec.path, settings)
+        reasons = [Reason("engine.reason.tune_only_kept"), change_reason(spec, param, old, settings[param.name])]
+        reasons += [change_reason(spec, spec.param(k), fc.settings.get(k), settings[k])
+                    for k in settings if before.get(k) != settings[k] and spec.param(k) is not None]
+        filters = list(current.filters)
+        filters[index] = replace(fc, settings=settings)
+        latency, _ = chain_latency(filters, ctx.rate_hz, ctx.mm_per_px)
+        reasons.append(Reason("engine.reason.latency_estimate", {"ms": latency}))
+        cid = f"tune-{direction}"
+        out.append(Candidate(
+            id=cid, label_key=f"engine.candidate.{cid}.label", summary_key=f"engine.candidate.{cid}.summary",
+            changes=replace(base, filters=tuple(filters)),
+            reasons=(Reason(f"engine.reason.candidate_{cid}"),) + ctx.reasons + tuple(reasons) + area_reasons,
+            est_added_latency_ms=latency, tags=(cid, "tune-only")))
+    return out
 
 
 def _keep_current(current: ProfileInfo, ctx: _Context) -> Candidate:
     """The user's present profile, untouched (values are not clamped: it is a reference)."""
-    latency, unknown = _chain_latency(current.filters, ctx.rate_hz, ctx.mm_per_px)
+    latency, unknown = chain_latency(current.filters, ctx.rate_hz, ctx.mm_per_px)
     reasons = [Reason("engine.reason.candidate_keep-current")]
     reasons += [Reason("engine.reason.latency_unknown_filter", {"filter": p}) for p in unknown]
     reasons.append(Reason("engine.reason.latency_estimate", {"ms": latency}))
@@ -544,7 +675,7 @@ def refine(best: Candidate, results: list[CandidateResult], prefs: UserPreferenc
             continue
         settings = dict(fc.settings)
         settings[param.name] = param.clamp(new)
-        _enforce_constraints(spec.path, settings)
+        enforce_constraints(spec.path, settings)
         filters = list(best.changes.filters)
         filters[index] = replace(fc, settings=settings)
         return _refined_candidate(best, root, parsed[2] if parsed else current,

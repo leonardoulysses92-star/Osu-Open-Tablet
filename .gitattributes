@@ -1,0 +1,4 @@
+# The community data bundle is verified by SHA-256 after download from raw GitHub:
+# git must store and serve these bytes exactly as tools/refresh_data.py wrote them.
+data/** -text
+osu_tablet_assistant/knowledge/*.json text eol=lf

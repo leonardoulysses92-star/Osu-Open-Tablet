@@ -10,5 +10,8 @@
   "otd.error.settings_not_object": "El archivo de configuración de OpenTabletDriver {path} no tiene el formato esperado.",
   "otd.error.config_dir_missing": "No se encontró la carpeta de configuración de OpenTabletDriver: {path}",
   "otd.error.preset_name_invalid": "\"{name}\" no se puede usar como nombre de preset. Evita los caracteres < > : \" / \\ | ? * y el punto final.",
-  "otd.error.preset_exists": "Ya existe un preset con ese nombre: {path}"
+  "otd.error.preset_exists": "Ya existe un preset con ese nombre: {path}",
+  "otd.notice.old_version": "Información: tu configuración la escribió OpenTabletDriver {version}. Se recomienda la versión {recommended} o posterior si usas filtros interpoladores en Windows (0.6.8 mantiene los botones auxiliares y el táctil funcionando con ellos y 0.6.8.1 corrige un cierre del daemon de la 0.6.8). Actualizar es decisión tuya; si no lo haces, no cambia nada.",
+  "otd.location.installed": "OpenTabletDriver instalado: {path}",
+  "otd.location.portable": "OpenTabletDriver portable: {path}"
 }

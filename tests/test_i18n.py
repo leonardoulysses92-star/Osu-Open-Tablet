@@ -11,7 +11,8 @@ from unittest import mock
 
 from osu_tablet_assistant.gui import i18n
 from osu_tablet_assistant.gui.session import STEP_ORDER
-from osu_tablet_assistant.models import MapPreference, PlayStyle, Priority, Reason, SkillLevel, TabletSource
+from osu_tablet_assistant.models import (MapPreference, PlayStyle, PluginPolicy, Priority, Reason, SkillLevel,
+                                         TabletSource)
 
 PACKAGE = Path(i18n.__file__).resolve().parent.parent
 _KEY = re.compile(r"""\bt\(\s*f?["']((?:gui|core)\.[A-Za-z0-9_.{}\-]+)["']""")
@@ -118,6 +119,18 @@ class LocaleFileTests(unittest.TestCase):
                      for s in ("", "_help")}
         expected |= {f"gui.tablet.source.{s.value}" for s in TabletSource} | {"gui.tablet.source.profile"}
         expected |= {f"core.error.tablet_{k}" for k in ("name", "size", "rate", "pressure")}
+        expected |= {f"core.pref.plugin_policy.{p.value}" for p in PluginPolicy}
+        expected |= {f"gui.questions.plugin_policy.{p.value}_help" for p in PluginPolicy}
+        expected |= {f"gui.questions.plugin_policy.{part}" for part in ("title", "why")}
+        expected |= {f"gui.data.origin.{o}" for o in ("bundled", "downloaded")}
+        expected |= {f"gui.preset.confidence.{c}" for c in ("high", "medium", "low")}
+        expected |= {f"otd.location.{k}" for k in ("installed", "portable")}
+        from osu_tablet_assistant.knowledge import updater
+        reasons = ("offline", "http", "too_large", "refused", "manifest", "schema", "missing", "truncated",
+                   "checksum", "unknown_path", "url", "disabled")
+        expected |= {f"core.update.error.{r}" for r in reasons}
+        self.assertTrue({"offline", "http", "too_large", "refused"} <= set(reasons))
+        self.assertTrue(updater.FILES)
         self.assertEqual(sorted(expected - known), [])
 
 

@@ -47,6 +47,13 @@ class SkillLevel(str, Enum):
     ADVANCED = "advanced"
 
 
+class PluginPolicy(str, Enum):
+    """Which OTD plugins the assistant may use (it never installs plugins itself)."""
+    TUNE_ONLY = "tune_only"      # keep the current filters, only adjust their parameters
+    INSTALLED = "installed"      # choose among plugins found in OTD's Plugins folder
+    ALLOW_NEW = "allow_new"      # also suggest plugins that are not installed (with source + hint)
+
+
 class TabletSource(str, Enum):
     OTD_CONFIG = "otd-config"    # read from the OTD installation
     BUILTIN = "builtin"          # shipped with this project
@@ -97,6 +104,7 @@ class UserPreferences:
     notices_input_lag: bool = False
     preferred_area_width_mm: float | None = None  # keep my current size, if set
     language: str = "es"                  # "es" | "en"
+    plugin_policy: PluginPolicy = PluginPolicy.INSTALLED
 
 
 # --------------------------------------------------------------------------

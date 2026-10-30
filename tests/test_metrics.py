@@ -247,6 +247,165 @@ class AimTests(unittest.TestCase):
             self.assertIsNone(report.aim_error_mean_mm)
             self.assertIsNone(report.aim_time_ms_mean)
         self.assertIsNone(metrics.aim_report(self.clicks(), 0.0).aim_error_mean_mm)
+        weird = [PenSample(0.0, 1, 1)], [PenSample(1.0, 1, 1)] * 3, [PenSample(math.nan, 0, 0)] * 4
+        for samples in weird:
+            report = metrics.aim_report(self.clicks(), 0.1, samples=samples, radius_px=math.nan,
+                                        center_fraction=-1.0, settle_s=math.inf)
+            self.assertAlmostEqual(report.aim_error_mean_mm, (5 + 0 + 10 + 5) / 4 * 0.1)
+            self.assertEqual(report.extras["trajectory_count"], 0)
+            self.assertNotIn("center_reach_rate", report.extras)
+
+    def test_without_trajectory_falls_back_to_activation_point(self) -> None:
+        report = metrics.aim_report(self.clicks(), 0.1)
+        self.assertEqual(report.extras["trajectory_count"], 0)
+        self.assertEqual(report.extras["activation_count"], 4)
+        self.assertAlmostEqual(report.extras["activation_error_mean_mm"], report.aim_error_mean_mm)
+        for key in ("settle_rms_mm", "path_efficiency_mean", "overshoot_mean_mm", "overshoot_max_mm"):
+            self.assertIsNone(report.extras[key], key)
+
+    def test_time_statistics(self) -> None:
+        times = [0.1, 0.2, 0.3, 0.4, 1.0]
+        hits = [(PenSample(10.0 * i + t, 0, 0), (0.0, 0.0)) for i, t in enumerate(times)]
+        report = metrics.aim_report(hits, 0.1, appear_times=[10.0 * i for i in range(5)])
+        self.assertAlmostEqual(report.aim_time_ms_mean, 400.0)
+        self.assertAlmostEqual(report.extras["aim_time_ms_median"], 300.0)
+        self.assertAlmostEqual(report.extras["aim_time_ms_p95"], 400.0 + 0.8 * 600.0)
+
+
+class CircleGeometryTests(unittest.TestCase):
+    C = (0.0, 0.0)
+
+    def test_entry_crossing(self) -> None:
+        f = metrics.segment_circle_entry((-20.0, 0.0), (20.0, 0.0), self.C, 5.0)
+        self.assertAlmostEqual(f, 15 / 40)
+        f = metrics.segment_circle_entry((-10.0, 3.0), (10.0, 3.0), self.C, 5.0)   # 3-4-5: enters at x = -4
+        self.assertAlmostEqual(f, 6 / 20)
+
+    def test_very_fast_flick_through_the_circle(self) -> None:
+        # Both samples far outside, the whole circle lies between them.
+        f = metrics.segment_circle_entry((-1e6, 1.0), (1e6, 1.0), self.C, 5.0)
+        self.assertIsNotNone(f)
+        x = -1e6 + f * 2e6
+        self.assertAlmostEqual(x, -math.sqrt(24.0), delta=1e-6)
+
+    def test_tangent_touches_and_grazing_misses(self) -> None:
+        self.assertEqual(metrics.segment_circle_entry((-10.0, 5.0), (10.0, 5.0), self.C, 5.0), 0.5)
+        self.assertIsNone(metrics.segment_circle_entry((-10.0, 5.0001), (10.0, 5.0001), self.C, 5.0))
+        diag = 5.0 / math.sqrt(2)      # tangent at 45 degrees, rounding-prone
+        f = metrics.segment_circle_entry((diag - 10, diag + 10), (diag + 10, diag - 10), self.C, 5.0)
+        self.assertAlmostEqual(f, 0.5, delta=1e-6)
+
+    def test_end_on_boundary_counts(self) -> None:
+        self.assertEqual(metrics.segment_circle_entry((-15.0, 0.0), (-5.0, 0.0), self.C, 5.0), 1.0)
+
+    def test_no_entry_cases(self) -> None:
+        self.assertIsNone(metrics.segment_circle_entry((-20.0, 0.0), (-6.0, 0.0), self.C, 5.0))   # stops short
+        self.assertIsNone(metrics.segment_circle_entry((-6.0, 0.0), (-20.0, 0.0), self.C, 5.0))   # moving away
+        self.assertIsNone(metrics.segment_circle_entry((-6.0, 0.0), (-6.0, 0.0), self.C, 5.0))    # not moving
+        self.assertIsNone(metrics.segment_circle_entry((10.0, -10.0), (10.0, 10.0), self.C, 5.0))  # passes by
+
+    def test_start_inside_is_zero(self) -> None:
+        self.assertEqual(metrics.segment_circle_entry((1.0, 1.0), (50.0, 0.0), self.C, 5.0), 0.0)
+        self.assertEqual(metrics.segment_circle_entry((5.0, 0.0), (50.0, 0.0), self.C, 5.0), 0.0)
+
+    def test_exit(self) -> None:
+        self.assertAlmostEqual(metrics.segment_circle_exit((0.0, 0.0), (10.0, 0.0), self.C, 5.0), 0.5)
+        self.assertAlmostEqual(metrics.segment_circle_exit((-4.0, 3.0), (6.0, 3.0), self.C, 5.0), 0.8)
+        self.assertIsNone(metrics.segment_circle_exit((0.0, 0.0), (1.0, 1.0), self.C, 5.0))
+        self.assertIsNone(metrics.segment_circle_exit((0.0, 0.0), (5.0, 0.0), self.C, 5.0))     # ends on the edge
+        self.assertEqual(metrics.segment_circle_exit((5.0, 0.0), (9.0, 0.0), self.C, 5.0), 0.0)  # edge, outward
+        self.assertIsNone(metrics.segment_circle_exit((1.0, 1.0), (1.0, 1.0), self.C, 5.0))
+
+
+class HoverAimReportTests(unittest.TestCase):
+    """Hand-computed trajectory: target (100, 0), radius 20, center zone 15 (fraction 0.75), 0.1 mm/px.
+
+    The cursor waits at the origin, bends through (36, 48) and heads straight
+    for the center, touches the circle at (84, 12) at t = 0.100 s, then slides
+    along y = 12 at 1000 px/s to (120, 12) (enters the center zone at x = 91,
+    passes 12 px from the center at x = 100, leaves the circle at x = 116) and
+    stops there.
+    """
+    TARGET = (100.0, 0.0)
+    PATH = [PenSample(0.0, 0, 0), PenSample(0.05, 36, 48), PenSample(0.10, 84, 12), PenSample(0.136, 120, 12),
+            PenSample(0.2, 120, 12), PenSample(0.5, 120, 12)]
+
+    def report(self, path=None, **kw):
+        hit = (PenSample(0.10, 84.0, 12.0), self.TARGET)
+        args = {"appear_times": [0.0], "samples": self.PATH if path is None else path, "radius_px": 20.0,
+                "center_fraction": 0.75}
+        args.update(kw)
+        return metrics.aim_report([hit], 0.1, **args)
+
+    def test_hand_computed_values(self) -> None:
+        r = self.report()
+        ex = r.extras
+        self.assertEqual(r.sample_count, 1)
+        self.assertEqual(ex["trajectory_count"], 1)
+        self.assertAlmostEqual(r.aim_time_ms_mean, 100.0)
+        self.assertAlmostEqual(r.aim_error_mean_mm, 1.2)                  # closest approach 12 px
+        self.assertAlmostEqual(ex["activation_error_mean_mm"], 2.0)       # touched at the edge, 20 px
+        self.assertAlmostEqual(ex["bias_x_mm"], 0.0)
+        self.assertAlmostEqual(ex["bias_y_mm"], 1.2)
+        # On-target window x = 84 -> 116 at y = 12: |e|^2 + e.d + |d|^2 / 3 = 400 - 512 + 1024 / 3.
+        self.assertAlmostEqual(ex["settle_rms_mm"], math.sqrt(688 / 3) * 0.1)
+        self.assertAlmostEqual(ex["path_efficiency_mean"], math.sqrt(7200) / 120)   # = 1 / sqrt(2)
+        self.assertAlmostEqual(ex["overshoot_mean_mm"], 2.0)              # stopped at x = 120
+        self.assertAlmostEqual(ex["overshoot_max_mm"], 2.0)
+        self.assertAlmostEqual(ex["center_time_ms_mean"], 107.0)          # x = 91 reached at 0.107 s
+        self.assertAlmostEqual(ex["center_reach_rate"], 1.0)
+        self.assertEqual(ex["aim_time_source"], "appear")
+
+    def test_closest_approach_stops_when_the_cursor_leaves(self) -> None:
+        back = self.PATH[:4] + [PenSample(0.2, 100, 2), PenSample(0.5, 100, 2)]    # returns close later
+        self.assertAlmostEqual(self.report(back).aim_error_mean_mm, 1.2)
+        self.assertAlmostEqual(self.report(back).extras["overshoot_mean_mm"], 2.0)
+        self.assertAlmostEqual(self.report(back, radius_px=None).aim_error_mean_mm, 0.2)   # no circle, no cut
+        self.assertNotIn("center_reach_rate", self.report(back, radius_px=None).extras)
+
+    def test_settle_window_length(self) -> None:
+        short = self.report(settle_s=0.01)           # window ends at x = 94
+        self.assertAlmostEqual(short.aim_error_mean_mm, math.sqrt(36 + 144) * 0.1)
+        self.assertAlmostEqual(short.extras["overshoot_mean_mm"], 2.0)     # own 120 ms window
+        self.assertAlmostEqual(self.report(overshoot_s=0.01).extras["overshoot_mean_mm"], 0.0)
+        self.assertAlmostEqual(self.report(overshoot_s=0.018).extras["overshoot_mean_mm"], 0.2)   # x = 102
+
+    def test_overshoot_ignores_the_move_to_the_next_target(self) -> None:
+        # Rests at x = 120, then 150 ms after activation heads on in the same direction.
+        onward = self.PATH[:4] + [PenSample(0.25, 120, 12), PenSample(0.35, 400, 12)]
+        self.assertAlmostEqual(self.report(onward).extras["overshoot_mean_mm"], 2.0)
+        self.assertAlmostEqual(self.report(onward, overshoot_s=0.2).extras["overshoot_mean_mm"], 16.0)   # x = 260
+
+    def test_center_zone_not_reached(self) -> None:
+        r = self.report(center_fraction=0.5)         # zone 10 < 12 px pass distance
+        self.assertEqual(r.extras["center_reach_rate"], 0.0)
+        self.assertIsNone(r.extras["center_time_ms_mean"])
+        self.assertIsNone(r.extras["center_time_ms_median"])
+
+    def test_straight_approach_is_efficient(self) -> None:
+        path = [PenSample(0.0, 0, 0), PenSample(0.08, 80, 0), PenSample(0.1, 100, 0), PenSample(0.5, 100, 0)]
+        r = metrics.aim_report([(PenSample(0.08, 80.0, 0.0), self.TARGET)], 0.1, appear_times=[0.0],
+                               samples=path, radius_px=20.0)
+        self.assertAlmostEqual(r.extras["path_efficiency_mean"], 1.0)
+        self.assertAlmostEqual(r.aim_error_mean_mm, 0.0)
+        self.assertAlmostEqual(r.extras["overshoot_mean_mm"], 0.0)
+        self.assertAlmostEqual(r.extras["center_time_ms_mean"], 0.08 * 1000 + 13.0)   # zone 7 px: x = 93
+
+    def test_activation_outside_trajectory_falls_back(self) -> None:
+        hits = [(PenSample(0.10, 84.0, 12.0), self.TARGET), (PenSample(9.0, 500.0, 3.0), (500.0, 0.0))]
+        r = metrics.aim_report(hits, 0.1, appear_times=[0.0, 0.10], samples=self.PATH, radius_px=20.0)
+        self.assertEqual(r.extras["trajectory_count"], 1)
+        self.assertAlmostEqual(r.aim_error_mean_mm, (1.2 + 0.3) / 2)
+
+    def test_scales_with_mm_per_px(self) -> None:
+        a = metrics.aim_report([(PenSample(0.10, 84.0, 12.0), self.TARGET)], 0.1, appear_times=[0.0],
+                               samples=self.PATH, radius_px=20.0)
+        b = metrics.aim_report([(PenSample(0.10, 84.0, 12.0), self.TARGET)], 0.2, appear_times=[0.0],
+                               samples=self.PATH, radius_px=20.0)
+        self.assertAlmostEqual(b.aim_error_mean_mm, 2 * a.aim_error_mean_mm)
+        self.assertAlmostEqual(b.extras["settle_rms_mm"], 2 * a.extras["settle_rms_mm"])
+        self.assertAlmostEqual(b.extras["path_efficiency_mean"], a.extras["path_efficiency_mean"])
+        self.assertAlmostEqual(b.aim_time_ms_mean, a.aim_time_ms_mean)
 
 
 if __name__ == "__main__":

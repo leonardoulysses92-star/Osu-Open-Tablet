@@ -1,5 +1,5 @@
 {
-  "tests.common.start_hint": "Haz clic (o toca con el lápiz) para empezar",
+  "tests.common.start_hint": "Haz clic, toca con el lápiz o pulsa Espacio / Enter para empezar",
   "tests.common.cancel_hint": "ESC para cancelar",
   "tests.common.countdown": "Empieza en {n}",
   "tests.common.progress": "{done} / {total}",
@@ -13,6 +13,10 @@
   "tests.tracking.instructions": "Un punto rosa se moverá dibujando un ocho a velocidad constante durante unos 8 segundos. Sigue el punto con el cursor lo mejor que puedas. Mide el retraso, el error y la suavidad.",
   "tests.tracking.running": "Sigue el punto",
   "tests.aim.title": "Prueba de puntería",
-  "tests.aim.instructions": "Irán apareciendo 20 círculos, de uno en uno. Haz clic en el centro de cada uno (la punta del lápiz es el clic izquierdo) con rapidez y precisión.",
-  "tests.aim.running": "Haz clic en el círculo"
+  "tests.aim.instructions": "Irán apareciendo 20 círculos, de uno en uno. NO hace falta hacer clic: solo lleva el lápiz hasta cada círculo lo más rápido que puedas, con la punta apoyada en la tableta o en el aire (hover), como juegues normalmente. El círculo cuenta en cuanto el cursor lo toca y el siguiente aparece al instante. Apunta al punto central: se mide tu velocidad y la precisión con la que te detienes sobre el objetivo.",
+  "tests.aim.running": "Lleva el cursor al círculo (sin clic)",
+  "tests.aim.instructions_center": "Irán apareciendo 20 círculos, de uno en uno. NO hace falta hacer clic: solo lleva el lápiz al centro de cada círculo lo más rápido que puedas, con la punta apoyada en la tableta o en el aire (hover), como juegues normalmente. El círculo cuenta en cuanto el cursor llega a su zona central (el anillo discontinuo) y el siguiente aparece al instante.",
+  "tests.aim.running_center": "Lleva el cursor al centro del círculo (sin clic)",
+  "tests.aim.instructions_click": "Irán apareciendo 20 círculos, de uno en uno. Haz clic en el centro de cada uno (la punta del lápiz es el clic izquierdo) con rapidez y precisión.",
+  "tests.aim.running_click": "Haz clic en el círculo"
 }

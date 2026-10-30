@@ -38,11 +38,25 @@ KNOWN_PLUGINS: tuple[KnownPlugin, ...] = (
     KnownPlugin(("Temporal Resampler", "TemporalResampler"), ("TemporalResampler",)),
     KnownPlugin(("AbstractQbit's Radial Follow Smoothing", "RadialFollow"),
                 ("RadialFollow.RadialFollowSmoothingScreenSpace", "RadialFollow.RadialFollowSmoothingTabletSpace")),
-    KnownPlugin(("The Saturn Collection", "Saturn"), ("Saturn.Multifilter", "Saturn.AreaRoundingDFC"),
+    # Saturn.HRRNC only exists in Saturn 1.1.x (not in 1.0.0), so it is not assumed here;
+    # it is still found through the settings.json namespace heuristic once used.
+    KnownPlugin(("The Saturn Collection", "Saturn", "TheSaturnCollection"),
+                ("Saturn.Multifilter", "Saturn.AreaRoundingDFC"),
                 ("Saturn.CustomResetAbsoluteModeSettings", "Saturn.MultifilterExtraSettings")),
     KnownPlugin(("Kuuube's Chatter Exterminator", "Kuuube_s_Chatter_Exterminator"),
                 ("Kuuube_s_Chatter_Exterminator.Kuuube_s_CHATTER_EXTERMINATOR_RAW",
                  "Kuuube_s_Chatter_Exterminator.Kuuube_s_CHATTER_EXTERMINATOR_SMOOTH")),
+    # Added with the 2026-10-30 catalog audit (paths read in each plugin's source).
+    KnownPlugin(("Reconstructor",), ("VoiDPlugins.Filter.Reconstructor",)),
+    KnownPlugin(("Spectral Reconstructor", "SpectralReconstructor", "TrajectoryEigenFilter.OTD"),
+                ("TrajectoryEigenFilter.OTD.TrajectoryEigenFilterPlugin",)),
+    KnownPlugin(("BezierInterpolator", "Bezier Interpolator"), ("BezierInterpolator.BezierInterp",)),
+    KnownPlugin(("jaaakb's ScuffedInter-Extrapolator", "ScuffedInterp", "ScuffedInterpolator"),
+                ("ScuffedInterpolator.ScuffedInterp",)),
+    KnownPlugin(("OnTake's Frenet-Serret Frame Predictor", "FrenetSerretFramePredictor"),
+                ("FrenetSerretFramePredictor.FrenetSerretFramePredictor",)),
+    KnownPlugin(("Hover Distance Limiter", "Hover_Distance_Limiter"),
+                ("Hover_Distance_Limiter.Hover_Distance_Limiter",)),
 )
 
 

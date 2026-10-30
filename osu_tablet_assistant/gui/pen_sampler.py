@@ -124,6 +124,25 @@ class PenSampler:
             out, self._samples = self._samples, []
         return out
 
+    def snapshot(self, start: int = 0) -> list[PenSample]:
+        """Copy of the samples from index ``start`` on, without clearing them.
+
+        Lets the GUI consume samples live (e.g. aim activation) while
+        :meth:`drain` still returns the whole run at the end. Indices restart
+        after a ``drain``.
+        """
+        with self._lock:
+            return self._samples[max(start, 0):]
+
+    def position(self) -> tuple[float, float] | None:
+        """Current cursor position: the source if there is one, else the last recorded sample."""
+        if self._source is not None:
+            pos = self._source()
+            if pos is not None:
+                return float(pos[0]), float(pos[1])
+        with self._lock:
+            return (float(self._last_pos[0]), float(self._last_pos[1])) if self._last_pos is not None else None
+
     def poll(self) -> PenSample | None:
         """Read the position source once; store and return a sample if it is due."""
         if self._source is None:

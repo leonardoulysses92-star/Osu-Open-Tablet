@@ -1,0 +1,15 @@
+{
+  "schema": 1,
+  "version": 1,
+  "date": "2026-10-30",
+  "files": {
+    "community_presets.json": {
+      "sha256": "873b17d613a4b7944a8f5876e1db32dc669f8d2b62d9b37f9ee00844458ffd52",
+      "size": 32398
+    },
+    "filters.json": {
+      "sha256": "c016276385677fd488fbde438b17984ba8dbfb70267b3161c9d4cbf125497981",
+      "size": 42564
+    }
+  }
+}

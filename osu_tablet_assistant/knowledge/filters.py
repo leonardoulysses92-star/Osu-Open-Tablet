@@ -14,7 +14,10 @@ from importlib import resources
 from typing import Any
 
 KINDS = ("float", "int", "bool", "enum")
-STAGES = ("raw", "pre", "post")          # OTD pipeline position, in execution order
+# OTD pipeline position, in execution order. "raw" = OTD 0.6.8 ``Internal``; in
+# 0.6.x ``PipelinePosition.Raw`` is an alias of PreTransform, so those are "pre".
+# Inside a stage OTD keeps the order of the profile's Filters list.
+STAGES = ("raw", "pre", "post")
 CONFIDENCES = ("high", "medium", "low")
 
 
@@ -57,8 +60,11 @@ class FilterParam:
 class FilterSpec:
     """Everything the engine knows about one filter.
 
-    ``summary_key`` and ``added_latency_note`` are i18n keys. ``advanced`` and
-    ``stage`` extend the architecture contract (both have defaults).
+    ``summary_key``, ``added_latency_note`` and ``policy_note`` are i18n keys.
+    ``advanced``, ``stage``, ``auto_recommend``, ``policy_note`` and
+    ``homepage`` extend the architecture contract (all have defaults).
+    ``auto_recommend`` False means the engine never picks the filter on its own
+    (prediction / input-assist risk, or not a smoothing filter): user decision only.
     """
     path: str
     display_name: str
@@ -71,6 +77,9 @@ class FilterSpec:
     confidence: str
     advanced: bool = False
     stage: str = "pre"
+    auto_recommend: bool = True
+    policy_note: str = ""
+    homepage: str = ""
 
     def param(self, name: str) -> FilterParam | None:
         """The param called ``name``, or None."""
@@ -118,11 +127,18 @@ def parse_catalog(data: dict[str, Any]) -> dict[str, FilterSpec]:
                 added_latency_note=str(raw["added_latency_note"]),
                 best_for=tuple(raw["best_for"]), summary_key=str(raw["summary_key"]),
                 sources=tuple(raw["sources"]), confidence=str(raw["confidence"]),
-                advanced=bool(raw.get("advanced", False)), stage=str(raw.get("stage", "pre")))
+                advanced=bool(raw.get("advanced", False)), stage=str(raw.get("stage", "pre")),
+                auto_recommend=raw.get("auto_recommend", True),
+                policy_note=str(raw.get("policy_note") or ""), homepage=str(raw.get("homepage") or ""))
             if spec.confidence not in CONFIDENCES or spec.stage not in STAGES:
                 raise ValueError(f"{path}: invalid confidence or stage")
+            if not isinstance(spec.auto_recommend, bool):
+                raise ValueError(f"{path}: auto_recommend must be a bool")
             if not spec.sources:
                 raise ValueError(f"{path}: at least one source is required")
+            if not all(isinstance(s, str) and s.startswith("https://") for s in spec.sources) \
+                    or (spec.homepage and not spec.homepage.startswith("https://")):
+                raise ValueError(f"{path}: sources and homepage must be https URLs")
             if path in catalog:
                 raise ValueError(f"{path}: duplicated path")
             catalog[path] = spec
@@ -133,10 +149,29 @@ def parse_catalog(data: dict[str, Any]) -> dict[str, FilterSpec]:
 
 @lru_cache(maxsize=1)
 def _packaged_catalog() -> tuple[tuple[str, FilterSpec], ...]:
+    return tuple(parse_catalog(packaged_document()).items())
+
+
+def packaged_document() -> dict[str, Any]:
+    """The decoded ``filters.json`` shipped with the program."""
     text = resources.files(__package__).joinpath("filters.json").read_text(encoding="utf-8")
-    return tuple(parse_catalog(json.loads(text)).items())
+    return json.loads(text)
+
+
+_override: tuple[tuple[str, FilterSpec], ...] | None = None
+
+
+def set_catalog_override(data: dict[str, Any] | None) -> None:
+    """Use a validated downloaded ``filters.json`` instead of the packaged one (None = packaged).
+
+    Only ``knowledge.updater`` calls this, after checksum and schema checks;
+    paths unknown to the packaged catalog are rejected there (data only).
+    Raises ValueError when ``data`` is not a valid catalog.
+    """
+    global _override
+    _override = None if data is None else tuple(parse_catalog(data).items())
 
 
 def load_catalog() -> dict[str, FilterSpec]:
-    """The packaged filter catalog keyed by OTD Path (a fresh dict per call)."""
-    return dict(_packaged_catalog())
+    """The active filter catalog keyed by OTD Path (a fresh dict per call)."""
+    return dict(_override if _override is not None else _packaged_catalog())

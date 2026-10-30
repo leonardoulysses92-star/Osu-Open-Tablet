@@ -1,5 +1,5 @@
 {
-  "tests.common.start_hint": "Click (or tap with the pen) to start",
+  "tests.common.start_hint": "Click, tap with the pen or press Space / Enter to start",
   "tests.common.cancel_hint": "Press ESC to cancel",
   "tests.common.countdown": "Starting in {n}",
   "tests.common.progress": "{done} / {total}",
@@ -13,6 +13,10 @@
   "tests.tracking.instructions": "A pink dot will move in a figure eight at constant speed for about 8 seconds. Follow the dot with your cursor as closely as you can. This measures delay, error and smoothness.",
   "tests.tracking.running": "Follow the dot",
   "tests.aim.title": "Aim test",
-  "tests.aim.instructions": "20 circles will appear one at a time. Click the center of each one (pen tip is left click) quickly and accurately.",
-  "tests.aim.running": "Click the circle"
+  "tests.aim.instructions": "20 circles will appear one at a time. You do NOT need to click: just move the pen onto each circle as fast as you can, with the tip touching the tablet or hovering above it, whichever you play with. A circle counts the moment the cursor touches it, and the next one appears right away. Aim for the center dot: it measures your speed and how precisely you stop on the target.",
+  "tests.aim.running": "Move onto the circle (no click needed)",
+  "tests.aim.instructions_center": "20 circles will appear one at a time. You do NOT need to click: just move the pen to the center of each circle as fast as you can, with the tip touching the tablet or hovering above it, whichever you play with. A circle counts the moment the cursor reaches its center zone (the dashed ring), and the next one appears right away.",
+  "tests.aim.running_center": "Move to the center of the circle (no click needed)",
+  "tests.aim.instructions_click": "20 circles will appear one at a time. Click the center of each one (pen tip is left click) quickly and accurately.",
+  "tests.aim.running_click": "Click the circle"
 }

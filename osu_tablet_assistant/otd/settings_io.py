@@ -25,6 +25,7 @@ import sys
 import tempfile
 import time
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -353,20 +354,157 @@ def backup_settings(config_dir: Path) -> Path:
     return dest
 
 
-def save_preset(config_dir: Path, name: str, settings: dict, overwrite: bool = False) -> Path:
-    """Write ``settings`` as ``<config>/Presets/<name>.json`` (atomic) and return the path.
+def save_preset(config_dir: Path, name: str, settings: dict, overwrite: bool = False,
+                destination: Path | None = None) -> Path:
+    """Write ``settings`` as ``<name>.json`` (atomic) and return the path.
 
-    Raises ``OtdSettingsError`` for an unsafe name, or when the preset exists
-    and ``overwrite`` is False.
+    The file goes to ``<config>/Presets/`` or, with ``destination``, straight
+    into that folder (e.g. the user's own folder next to a portable OTD). It is
+    a complete OTD settings document, loadable with OTD's "Load settings".
+    Overwriting needs ``overwrite=True`` and first copies the old file to
+    ``<folder>/Backup/<name>-<timestamp>.json``. Raises ``OtdSettingsError``
+    for an unsafe name, or when the file exists and ``overwrite`` is False.
     """
     if not is_valid_preset_name(name):
         raise OtdSettingsError("otd.error.preset_name_invalid", f"invalid preset name: {name!r}", name=name)
-    path = Path(config_dir) / PRESETS_DIR / f"{name}.json"
-    if path.exists() and not overwrite:
-        raise OtdSettingsError("otd.error.preset_exists", f"preset already exists: {path}", path=str(path))
+    folder = Path(destination) if destination is not None else Path(config_dir) / PRESETS_DIR
+    path = folder / f"{name}.json"
+    if path.exists():
+        if not overwrite:
+            raise OtdSettingsError("otd.error.preset_exists", f"preset already exists: {path}", path=str(path))
+        backup_file(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     _atomic_write_json(path, settings)
     return path
+
+
+def backup_file(path: Path) -> Path:
+    """Copy ``path`` to ``<its folder>/Backup/<stem>-<timestamp>.json`` and return the copy."""
+    folder = path.parent / BACKUP_DIR
+    folder.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+    dest = folder / f"{path.stem}-{stamp}{path.suffix}"
+    n = 1
+    while dest.exists():
+        n += 1
+        dest = folder / f"{path.stem}-{stamp}-{n}{path.suffix}"
+    shutil.copy2(path, dest)
+    return dest
+
+
+FULL_SETTINGS_KEYS = ("Revision", "Profiles", "LockUsableAreaDisplay", "LockUsableAreaTablet", "Tools")
+
+
+def is_full_settings(doc: Any) -> bool:
+    """True for a complete OTD 0.6 settings document (what "Load settings" accepts)."""
+    return isinstance(doc, dict) and all(k in doc for k in FULL_SETTINGS_KEYS) \
+        and isinstance(doc.get("Profiles"), list)
+
+
+# --------------------------------------------------------------------------
+# OTD version and config locations (read-only)
+# --------------------------------------------------------------------------
+RECOMMENDED_OTD = (0, 6, 8, 1)
+
+
+def otd_version(settings: Any) -> tuple[int, ...] | None:
+    """OTD version that wrote ``settings`` (its ``Revision``, e.g. "0.6.7"), or None."""
+    revision = settings.get("Revision") if isinstance(settings, dict) else None
+    if not isinstance(revision, str):
+        return None
+    parts = revision.strip().split(".")
+    if not 2 <= len(parts) <= 4 or not all(p.isdigit() for p in parts):
+        return None
+    return tuple(int(p) for p in parts)
+
+
+def version_notice(settings: Any) -> tuple[str, dict[str, Any]] | None:
+    """Informational (never forced) notice when OTD is older than 0.6.8.1.
+
+    The 2026-10-30 audit: 0.6.8 keeps aux buttons/touch working with an
+    interpolator, and 0.6.8.1 fixes a Windows daemon crash with async filters
+    in 0.6.8. Returns an ``(i18n key, params)`` pair or None.
+    """
+    version = otd_version(settings)
+    if version is None:
+        return None
+    padded = version + (0,) * (4 - len(version))
+    if padded >= RECOMMENDED_OTD:
+        return None
+    return "otd.notice.old_version", {"version": ".".join(map(str, version)),
+                                      "recommended": ".".join(map(str, RECOMMENDED_OTD))}
+
+
+PORTABLE_MARKER = "convert_to_portable.bat"
+_MAX_PROBE_BYTES = 5_000_000
+
+
+@dataclass(frozen=True)
+class ConfigLocation:
+    """A folder OTD may read its settings from (``kind``: "installed" | "portable")."""
+    path: Path
+    kind: str
+    settings_files: tuple[Path, ...] = ()   # full settings documents found there (e.g. Osu.json)
+
+
+def is_portable_dir(path: Path, system: str | None = None) -> bool:
+    """A portable OTD folder: the daemon or ``convert_to_portable.bat`` next to settings/userdata."""
+    try:
+        if not ((path / PORTABLE_MARKER).is_file() or (path / daemon_exe_name(system)).is_file()):
+            return False
+        return (path / PORTABLE_DATA_DIR).is_dir() or bool(settings_documents(path))
+    except OSError:
+        return False
+
+
+def settings_documents(folder: Path) -> tuple[Path, ...]:
+    """``*.json`` files directly in ``folder`` that are complete OTD settings documents."""
+    found = []
+    try:
+        files = sorted(p for p in folder.glob("*.json") if p.is_file())
+    except OSError:
+        return ()
+    for path in files:
+        try:
+            if path.stat().st_size > _MAX_PROBE_BYTES:
+                continue
+            if is_full_settings(json.loads(path.read_text(encoding="utf-8-sig"))):
+                found.append(path)
+        except (OSError, UnicodeDecodeError, ValueError):
+            continue
+    return tuple(found)
+
+
+def config_locations(system: str | None = None, env: Mapping[str, str] | None = None,
+                     home: Path | None = None, extra: Iterable[Path] = ()) -> list[ConfigLocation]:
+    """Every OTD settings location found: the per-user folder and portable installs.
+
+    For a portable install the location is its ``userdata`` folder when it
+    exists, else the install folder itself (where a saved ``Osu.json`` may
+    live). ``extra`` adds folders to probe (e.g. the user's output folder).
+    """
+    system = system or platform.system()
+    env = os.environ if env is None else env
+    home = Path.home() if home is None else home
+    out: list[ConfigLocation] = []
+    seen: set[str] = set()
+
+    def add(path: Path, kind: str, docs_from: Iterable[Path]) -> None:
+        key = os.path.normcase(str(path))
+        if key in seen:
+            return
+        seen.add(key)
+        docs = tuple(doc for folder in docs_from for doc in settings_documents(folder))
+        out.append(ConfigLocation(path, kind, docs))
+
+    default = default_config_dir(system, env, home)
+    if default.is_dir():
+        add(default, "installed", (default,))
+    for cand in list(extra) + install_candidates(system, env, home):
+        if is_portable_dir(cand, system):
+            data = cand / PORTABLE_DATA_DIR
+            add(data if data.is_dir() else cand, "portable", (cand, data) if data.is_dir() else (cand,))
+    return out
 
 
 def is_valid_preset_name(name: str) -> bool:
