@@ -72,6 +72,37 @@ class GuiSmokeTests(unittest.TestCase):
         app._on_language()   # rebuilds the current page in the other language
         app.root.update()
 
+    def test_testing_table_shows_words_repeat_button_and_no_score_column(self) -> None:
+        s = self.harness.drive_to_testing(self)
+        cand = s.candidate("balanced")
+        s.apply_candidate(cand, confirmed=True)
+        for kind in CANDIDATE_KINDS[:1]:
+            s.run_measurement(None, kind, cand)          # partial: incomplete
+        app = self.app()
+        page = app.wizard.page
+        self.assertIsInstance(page, wizard.TestingPage)
+        self.assertEqual(tuple(page._tree["columns"]), ("label", "status", "result"))
+        page._tree.selection_set("balanced")
+        page._show_detail()
+        self.assertEqual(page._btn_test.cget("text"), i18n.t("gui.testing.test"))
+        self.assertIn("incompleta", page._tree.set("balanced", "result"))
+        for kind in CANDIDATE_KINDS:
+            s.run_measurement(None, kind, cand)          # complete, stillness measured twice
+        page._refresh_rows()
+        page._show_detail()
+        self.assertEqual(page._btn_test.cget("text"), i18n.t("gui.testing.repeat"))
+        grades = {i18n.t(f"gui.testing.grade.{g}") for g in ("excellent", "good", "normal", "weak")}
+        self.assertIn(page._tree.set("balanced", "result"), grades)
+        self.assertTrue(page._tree.set("balanced", "status").startswith("Probada"))
+        s.set_rating("balanced", 4)
+        page._refresh_rows()
+        self.assertTrue(page._tree.set("balanced", "result").endswith("★4"))
+        self.assertEqual(page._tree.set("balanced", "label")[:1], "★")   # the only complete option wins
+        for lang in i18n.SUPPORTED:
+            i18n.set_language(lang)
+            page._refresh_rows()
+            page._show_detail()
+
     def test_result_sections_extension_point(self) -> None:
         self.measured()
         self.session.advance()

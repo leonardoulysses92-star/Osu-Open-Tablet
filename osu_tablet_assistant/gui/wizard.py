@@ -48,6 +48,7 @@ from .session import (
     describe_changes,
     filter_table,
     metric_lines,
+    plain_verdict,
 )
 from .widgets import (
     COLORS,
@@ -786,15 +787,18 @@ class TestingPage(Page):
         columns.pack(fill="x")
         left = self.card(t("gui.testing.options_title"), parent=columns)
         columns.add(left)
-        self._tree = ttk.Treeview(left.body, columns=("label", "status", "score", "rating"),
+        self._tree = ttk.Treeview(left.body, columns=("label", "status", "result"),
                                   show="headings", height=7, selectmode="browse")
-        for col, key, width in (("label", "gui.testing.col.option", 150), ("status", "gui.testing.col.status", 92),
-                                ("score", "gui.testing.col.score", 70), ("rating", "gui.testing.col.rating", 88)):
+        for col, key, width in (("label", "gui.testing.col.option", 170), ("status", "gui.testing.col.status", 96),
+                                ("result", "gui.testing.col.result", 100)):
             self._tree.heading(col, text=t(key))
             self._tree.column(col, width=px(self, width), anchor="w", stretch=col == "label",
                               minwidth=px(self, 40))
         self._tree.pack(fill="both", expand=True)
         self._tree.bind("<<TreeviewSelect>>", lambda _e: self._show_detail())
+        self._tie_note = WrapLabel(left.body, "", "Small")
+        if s.can_measure:
+            WrapLabel(left.body, t("gui.testing.table_help"), "Small").pack(fill="x", pady=(px(self, 8), 0))
         right = self.card(parent=columns)
         columns.add(right)
         head = frame(right.body)
@@ -828,7 +832,7 @@ class TestingPage(Page):
             btn.pack(side="left", padx=(0, px(self, 8)))
         self._status = Notice(self)
         self._status.pack(fill="x", pady=(0, px(self, 8)))
-        self._details = Expander(self)
+        self._details = Expander(self, t("gui.testing.tech_title"), height=12)
         self._details.pack(fill="x")
         self._refresh_rows()
         first = s.next_candidate() or (s.candidates[0] if s.candidates else None)
@@ -846,29 +850,51 @@ class TestingPage(Page):
         if cand.id == self._testing_id:
             return t("gui.testing.status.testing")
         if s.is_complete(cand.id):
-            return t("gui.testing.status.done")
+            runs = min(s.run_count(cand.id, kind) for kind in CANDIDATE_KINDS)
+            return t("gui.testing.status.done_n", n=runs) if runs > 1 else t("gui.testing.status.done")
         if cand.id in s.results and s.results[cand.id].reports:
             return t("gui.testing.status.partial")
         return t("gui.testing.status.pending")
 
+    def _verdict(self) -> Any:
+        """The session verdict (grades, ties); None while nothing is measured."""
+        try:
+            return self.session.verdict()
+        except SessionError:
+            return None
+
+    def _result_text(self, cand: Candidate, verdict: Any) -> str:
+        """Grade in words, "—" while incomplete, plus ★n only when the player rated it."""
+        result = self.session.results.get(cand.id)
+        info = verdict.summaries.get(cand.id) if verdict is not None else None
+        if info is None or not result or not result.reports:
+            text = ""
+        elif not info.complete:
+            text = t("gui.testing.grade.incomplete")
+        else:
+            text = t(f"gui.testing.grade.{info.grade}")
+        if result and result.user_rating:
+            text = f"{text}  ★{result.user_rating}".strip()
+        return text
+
     def _refresh_rows(self) -> None:
         s = self.session
-        try:
-            s.ranked()  # refreshes the scores
-            best = s.best_candidate()
-        except SessionError:
-            best = None
+        verdict = self._verdict()
+        top = set(verdict.top) if verdict is not None else set()
         keep = self._tree.selection()
         self._tree.delete(*self._tree.get_children())
         for cand in s.candidates:
-            result = s.results.get(cand.id)
-            score = f"{result.score:.1f}" if result and result.score is not None else ""
-            rating = str(result.user_rating) if result and result.user_rating else ""
-            star = "★ " if best is not None and best.id == cand.id else ""
+            star = "★ " if cand.id in top else ""
             self._tree.insert("", "end", iid=cand.id,
-                              values=(star + candidate_label(s, cand), self._status_of(cand), score, rating))
+                              values=(star + candidate_label(s, cand), self._status_of(cand),
+                                      self._result_text(cand, verdict)))
         if keep and self._tree.exists(keep[0]):
             self._tree.selection_set(keep[0])
+        if verdict is not None and verdict.tie:
+            self._tie_note.configure(text=t("gui.testing.tie"))
+            self._tie_note.pack(fill="x", pady=(px(self, 8), 0))
+        else:
+            self._tie_note.pack_forget()
 
     def _show_detail(self) -> None:
         cand = self._selected()
@@ -884,18 +910,21 @@ class TestingPage(Page):
         for child in self._info.winfo_children():
             child.destroy()
         WrapLabel(self._info, t(cand.summary_key), "Muted").pack(fill="x", pady=(0, px(self, 6)))
-        if cand.reasons:
-            bullets(self._info, [tr(reason) for reason in cand.reasons], role="Small").pack(fill="x")
         result = s.results.get(cand.id)
         reports = result.reports if result else ()
         measured = bool(reports)
-        if measured:
-            label(self._info, t("gui.testing.measured_title"), "Strong").pack(anchor="w", pady=(px(self, 10), 2))
-            bullets(self._info, metric_lines(reports), role="Small", marker="▪").pack(fill="x")
+        verdict = self._verdict()
+        info = verdict.summaries.get(cand.id) if verdict is not None else None
+        if measured and info is not None:
+            self._build_verdict(cand, reports, info, verdict)
+        else:
+            WrapLabel(self._info, t("gui.testing.no_data"), "Muted").pack(fill="x")
         self._rating.set((result.user_rating or 0) if result else 0)
-        self._details.set("\n".join(metric_lines(reports)) if measured else t("gui.testing.no_data"))
+        self._details.set(self._technical_text(cand, reports, info))
         busy = self._testing_id is not None
-        self._btn_test.configure(state="disabled" if busy else "normal")
+        done = s.is_complete(cand.id)
+        self._btn_test.configure(state="disabled" if busy else "normal",
+                                 text=t("gui.testing.repeat" if done else "gui.testing.test"))
         self._btn_use.configure(state="normal" if (measured or not s.can_measure) and not busy else "disabled")
         self._btn_refine.configure(state="normal" if s.results_with_reports() and not busy else "disabled")
         self._btn_restore.configure(state="normal" if s.live_candidate_id and not busy else "disabled")
@@ -904,6 +933,43 @@ class TestingPage(Page):
                 if isinstance(child, ttk.Radiobutton):
                     child.configure(state="normal" if measured and not busy else "disabled")
         self.wizard.update_nav()
+
+    def _build_verdict(self, cand: Candidate, reports: Any, info: Any, verdict: Any) -> None:
+        """Grade + reliability chips, 2-3 plain lines and the tie / repeat hint."""
+        row = frame(self._info)
+        row.pack(fill="x", pady=(px(self, 4), px(self, 4)))
+        if info.complete:
+            kind = {"excellent": "success", "good": "success", "normal": "neutral", "weak": "warn"}[info.grade]
+            Chip(row, t(f"gui.testing.grade.{info.grade}"), kind).pack(side="left", padx=(0, 6))
+        else:
+            Chip(row, t("gui.testing.grade.incomplete"), "neutral").pack(side="left", padx=(0, 6))
+        rel_kind = {"reliable": "success", "repeat": "warn", "few": "neutral"}[info.reliability]
+        rel = Chip(row, t(f"gui.testing.reliability.{info.reliability}"), rel_kind)
+        rel.pack(side="left")
+        Tooltip(rel, t("gui.testing.reliability_tip"))
+        lines = [t(key, **params) for key, params in plain_verdict(reports, cand.est_added_latency_ms)]
+        if lines:
+            bullets(self._info, lines, role="Body").pack(fill="x")
+        if not info.complete:
+            WrapLabel(self._info, t("gui.testing.incomplete_hint"), "Small").pack(fill="x", pady=(px(self, 6), 0))
+        elif info.tied and info.best:
+            WrapLabel(self._info, t("gui.testing.tie_hint"), "Small").pack(fill="x", pady=(px(self, 6), 0))
+        elif info.reliability == "repeat":
+            WrapLabel(self._info, t("gui.testing.repeat_hint"), "Small").pack(fill="x", pady=(px(self, 6), 0))
+
+    def _technical_text(self, cand: Candidate, reports: Any, info: Any) -> str:
+        """Everything the plain view hides: reasons, raw metrics, runs, numeric score."""
+        parts: list[str] = []
+        if cand.reasons:
+            parts += [tr(reason) for reason in cand.reasons]
+        if reports:
+            parts.append("")
+            parts += metric_lines(reports)
+        if info is not None and info.objective is not None:
+            parts.append("")
+            parts.append(t("gui.testing.tech_score", score=f"{info.objective:.1f}", noise=f"{info.noise:.1f}",
+                           runs=info.runs))
+        return "\n".join(parts) if parts else t("gui.testing.no_data")
 
     def _fail(self, exc: BaseException) -> None:
         if not self.alive():

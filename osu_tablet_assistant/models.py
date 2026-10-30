@@ -205,6 +205,11 @@ class MetricsReport:
 @dataclass
 class CandidateResult:
     candidate_id: str
+    # One aggregated report per test kind (median of ``runs``, see engine.judge);
+    # readers that only look at ``reports`` keep working.
     reports: tuple[MetricsReport, ...] = ()
     user_rating: int | None = None        # subjective feel, 1 (bad) .. 5 (great)
-    score: float | None = None            # filled by engine.recommend.rank
+    score: float | None = None            # filled by engine.recommend.rank (objective +/- rating)
+    runs: tuple[MetricsReport, ...] = ()  # every individual run, oldest first
+    objective: float | None = None        # rank(): score without the rating; the grade uses it
+    complete: bool = True                 # rank(): every required test kind was measured

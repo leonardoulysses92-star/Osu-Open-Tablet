@@ -46,6 +46,10 @@ TRACK_LOOPS = 2.0               # laps of the figure-8 during a tracking run
 TRACK_EXTENT = 0.35             # half-size of the figure-8 as a fraction of the display
 TRACK_PATH_HZ = 240.0           # sampling rate of the recorded target path
 AIM_TARGET_COUNT = 20
+AIM_WARMUP_TARGETS = 2          # extra targets at the start of a run that are shown but not scored
+# Every run of a test kind uses the same random sequence (targets), whatever the
+# option being tested, so differences between options are not target luck.
+TEST_SEEDS = {"rate": 11, "stillness": 12, "tracking": 13, "aim": 14}
 AIM_MARGIN_FRACTION = 0.1       # keep targets this far from the display border
 AIM_MIN_JUMP_FRACTION = 0.2     # consecutive targets are at least this far apart (of the shorter side)
 AIM_MIN_JUMP_RADII = 3.0        # ... and at least this many radii, so no target spawns under the cursor
@@ -71,6 +75,11 @@ SPECS = {
     "tracking": LiveTestSpec("tracking", 8.0, 1.0),
     "aim": LiveTestSpec("aim", 0.0, 0.0),
 }
+
+
+def test_rng(kind: str) -> random.Random:
+    """The deterministic generator for ``kind`` (same seed for every candidate and every repeat)."""
+    return random.Random(TEST_SEEDS.get(kind, 0))
 
 
 def kind_keys(kind: str, activation: str = "touch") -> dict[str, str]:
@@ -248,7 +257,8 @@ class AimSession:
 
     def __init__(self, targets: Sequence[tuple[float, float]], *, activation: str = "touch",
                  radius_px: float = AIM_DEFAULT_RADIUS_PX, center_fraction: float = metrics.AIM_CENTER_FRACTION,
-                 debounce_s: float = AIM_DEBOUNCE_S, max_step_px: float | None = None) -> None:
+                 debounce_s: float = AIM_DEBOUNCE_S, max_step_px: float | None = None,
+                 warmup: int = 0) -> None:
         if activation not in ACTIVATIONS:
             raise ValueError(f"unknown activation mode: {activation!r}")
         if not (math.isfinite(radius_px) and radius_px > 0):
@@ -261,6 +271,7 @@ class AimSession:
         self.center_fraction = center_fraction
         self.debounce_s = debounce_s
         self.max_step_px = max_step_px
+        self.warmup = max(0, int(warmup))     # leading targets that are played but not scored
         self.index = 0
         self.hits: list[AimHit] = []
         self.trail: list[PenSample] = []      # every cursor sample observed, in order
@@ -392,16 +403,20 @@ def aim_radius_px(mm_per_px: float) -> float:
 def new_aim_session(rect: tuple[int, int, int, int], mm_per_px: float, rng: random.Random, *,
                     cursor: tuple[float, float] | None, activation: str = "touch",
                     center_fraction: float = metrics.AIM_CENTER_FRACTION,
-                    count: int = AIM_TARGET_COUNT) -> AimSession:
-    """The aim session the test window runs: targets planned away from ``cursor``."""
+                    count: int = AIM_TARGET_COUNT, warmup: int = 0) -> AimSession:
+    """The aim session the test window runs: targets planned away from ``cursor``.
+
+    ``warmup`` extra targets come first and are left out of the report (the
+    first aims of a run are slower while the hand settles).
+    """
     _, _, width, height = rect
     radius = aim_radius_px(mm_per_px)
     short = min(width, height)
     margin = max(radius * 2, AIM_MARGIN_FRACTION * short)
     min_jump = max(AIM_MIN_JUMP_FRACTION * short, AIM_MIN_JUMP_RADII * radius)
-    targets = plan_aim_targets(rect, margin, count, rng, start=cursor, min_jump_px=min_jump)
+    targets = plan_aim_targets(rect, margin, count + max(0, warmup), rng, start=cursor, min_jump_px=min_jump)
     return AimSession(targets, activation=activation, radius_px=radius, center_fraction=center_fraction,
-                      max_step_px=AIM_TELEPORT_FRACTION * short)
+                      max_step_px=AIM_TELEPORT_FRACTION * short, warmup=warmup)
 
 
 # --------------------------------------------------------------------------
@@ -431,7 +446,8 @@ def build_report(kind: str, mm_per_px: float, samples: Sequence[PenSample], *, s
     if aim is None:
         raise ValueError("aim needs an AimSession")
     trajectory = kept or [s for s in aim.trail if s.t >= started_at]
-    return metrics.aim_report(aim.clicks, mm_per_px, appear_times=aim.appear_times, samples=trajectory,
+    return metrics.aim_report(aim.clicks[aim.warmup:], mm_per_px, appear_times=aim.appear_times[aim.warmup:],
+                              samples=trajectory,
                               radius_px=aim.radius, center_fraction=aim.center_fraction)
 
 
@@ -595,7 +611,8 @@ class _TestWindow:
         if self.kind == "aim":
             cursor = self._cursor()
             self.aim = new_aim_session(self.rect, self.mm_per_px, self._rng, cursor=cursor,
-                                       activation=self.activation, center_fraction=self.center_fraction)
+                                       activation=self.activation, center_fraction=self.center_fraction,
+                                       warmup=AIM_WARMUP_TARGETS)
             self._consumed = len(self._sampler.snapshot())
             self.aim.start(self._started_at, cursor)
         self.phase = "run"
@@ -643,7 +660,8 @@ class _TestWindow:
         target = aim.current
         if self._shown != (aim.index, target):
             self._shown = (aim.index, target)
-            label = self._t("tests.common.progress", done=len(aim.hits), total=len(aim.targets))
+            label = self._t("tests.common.progress", done=max(0, len(aim.hits) - aim.warmup),
+                            total=max(1, len(aim.targets) - aim.warmup))
             self.canvas.itemconfigure(self._items["label"], text=label)
             if target is None:
                 for item in ("ring", "zone", "center"):
@@ -706,7 +724,8 @@ def run_test(parent: Any, kind: str, mm_per_px: float, display: DisplaySpec | No
 
     ``on_cancel`` runs instead when the user presses ESC or closes the window.
     ``translate(key, **params)`` defaults to ``gui.i18n.t`` (or echoes the key
-    when i18n is unavailable). ``rng`` seeds the aim targets and ``sampler``
+    when i18n is unavailable). ``rng`` seeds the aim targets (default: the fixed ``TEST_SEEDS`` of the kind, so every run
+    and every option gets the same targets) and ``sampler``
     replaces the cursor sampler (both for tests). ``activation`` picks how aim
     targets fire (``ACTIVATIONS``; default ``"touch"``, no click needed) and
     ``center_fraction`` the center-zone radius relative to the target. Returns
@@ -721,5 +740,5 @@ def run_test(parent: Any, kind: str, mm_per_px: float, display: DisplaySpec | No
     if not (0 < center_fraction <= 1):
         raise ValueError("center_fraction must be in (0, 1]")
     _TestWindow(parent, kind, mm_per_px, display, on_done, on_cancel, resolve_translate(translate),
-                rng if rng is not None else random.Random(), sampler if sampler is not None else PenSampler(),
+                rng if rng is not None else test_rng(kind), sampler if sampler is not None else PenSampler(),
                 activation, center_fraction)

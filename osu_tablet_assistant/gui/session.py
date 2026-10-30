@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..appconfig import AppConfig, preset_file_name
+from ..engine import judge
 from ..knowledge import tablets as tablet_db
 from ..models import (
     ApplyResult,
@@ -604,10 +605,24 @@ class Session:
         return next((c for c in self.candidates if not self.is_complete(c.id)), None)
 
     def record_report(self, candidate_id: str, report: MetricsReport) -> None:
-        """Attach a measurement to a candidate, replacing the same kind."""
+        """Add one run of a test to a candidate.
+
+        Runs accumulate per (candidate, kind): ``result.runs`` keeps every one,
+        ``result.reports`` holds the aggregate (median, see ``engine.judge``),
+        so repeating a test refines the measurement instead of overwriting it.
+        """
         result = self.results.setdefault(candidate_id, CandidateResult(candidate_id))
-        kept = tuple(r for r in result.reports if r.test_kind != report.test_kind)
-        result.reports = kept + (report,)
+        result.runs = result.runs + (report,)
+        result.reports = judge.aggregate_by_kind(result.runs)
+
+    def run_count(self, candidate_id: str, kind: str) -> int:
+        """How many runs of ``kind`` the candidate has (the aggregate counts as one)."""
+        result = self.results.get(candidate_id)
+        return sum(1 for r in (result.runs if result else ()) if r.test_kind == kind)
+
+    def verdict(self) -> judge.Verdict:
+        """Grade, reliability and tie group of every measured candidate (ranks first)."""
+        return judge.summarize(self.ranked(), self.prefs, CANDIDATE_KINDS)
 
     def set_rating(self, candidate_id: str, rating: int | None) -> None:
         """Store the optional 1-5 feeling rating."""
@@ -624,7 +639,8 @@ class Session:
         measured = self.results_with_reports()
         if not measured:
             return []
-        return list(self._call("core.error.rank", self.services.rank, measured, self.prefs))
+        return list(self._call("core.error.rank", self.services.rank, measured, self.prefs,
+                               required_kinds=CANDIDATE_KINDS))
 
     def best_candidate(self) -> Candidate | None:
         """The user's explicit choice, else the best-ranked measured candidate."""
@@ -925,6 +941,33 @@ def metric_lines(reports: tuple[MetricsReport, ...] | list[MetricsReport]) -> li
             value = getattr(report, attr)
             if value is not None:
                 lines.append(t(key, value=fmt.format(value)))
+    return lines
+
+
+# Plain-language levels for the detail view: (metric attribute, good up to, fair up to) in the
+# metric's unit; lower is better. Heuristic references, not calibrated.
+_PLAIN_LEVELS = {
+    "stillness": ("jitter_rms_mm", 0.03, 0.08),
+    "tracking": ("path_error_mean_mm", 0.7, 1.5),
+    "aim": ("aim_error_mean_mm", 1.2, 2.5),
+}
+
+
+def plain_verdict(reports: Any, added_latency_ms: float = 0.0) -> list[tuple[str, dict[str, Any]]]:
+    """Short, jargon-free findings as ``(i18n key, params)``: one per measured test, plus the delay.
+
+    Keys are ``gui.verdict.<kind>.<good|fair|poor>`` and ``gui.verdict.latency``.
+    """
+    lines: list[tuple[str, dict[str, Any]]] = []
+    for kind in ("stillness", "tracking", "aim"):
+        attr, good, fair = _PLAIN_LEVELS[kind]
+        value = _metric(reports, kind, attr)
+        if value is None:
+            continue
+        level = "good" if value <= good else "fair" if value <= fair else "poor"
+        lines.append((f"gui.verdict.{kind}.{level}", {}))
+    if reports and added_latency_ms:
+        lines.append(("gui.verdict.latency", {"ms": f"{added_latency_ms:.0f}"}))
     return lines
 
 

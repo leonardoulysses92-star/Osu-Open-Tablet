@@ -574,11 +574,21 @@ def score_reports(reports: Sequence[MetricsReport], prefs: UserPreferences,
     return round(objective + adjustment, 6)
 
 
-def rank(results: list[CandidateResult], prefs: UserPreferences) -> list[CandidateResult]:
-    """Fill ``.score`` on every result; best first, ties keep input order."""
+def rank(results: list[CandidateResult], prefs: UserPreferences,
+         required_kinds: Sequence[str] | None = None) -> list[CandidateResult]:
+    """Fill ``.score`` (and ``.objective``, ``.complete``) on every result; best first.
+
+    Weights are renormalized over the metrics that exist, so a result that
+    lacks a test kind is scored on another basis. With ``required_kinds`` such
+    a result is flagged ``complete=False`` and always ranked after every
+    complete one. Ties keep input order.
+    """
     for result in results:
         result.score = score_reports(result.reports, prefs, result.user_rating)
-    return sorted(results, key=lambda r: -r.score)
+        result.objective = score_reports(result.reports, prefs, None)
+        done = {r.test_kind for r in result.reports}
+        result.complete = required_kinds is None or all(kind in done for kind in required_kinds)
+    return sorted(results, key=lambda r: (not r.complete, -r.score))
 
 
 # --------------------------------------------------------------------------

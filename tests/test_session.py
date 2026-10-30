@@ -114,7 +114,7 @@ class Fixture:
             raise RuntimeError("engine down")
         return [candidate("a"), candidate("b", 120.0)]
 
-    def rank(self, results: list[CandidateResult], prefs: Any) -> list[CandidateResult]:
+    def rank(self, results: list[CandidateResult], prefs: Any, **_kw: Any) -> list[CandidateResult]:
         for r in results:
             r.score = float(len(r.reports)) + (r.user_rating or 0) + (10 if r.candidate_id == "b" else 0)
         return sorted(results, key=lambda r: r.score or 0, reverse=True)
