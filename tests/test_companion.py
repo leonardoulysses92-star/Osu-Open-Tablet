@@ -4,11 +4,13 @@ from __future__ import annotations
 import copy
 import json
 import re
+import sys
 import tkinter as tk
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
+from osu_tablet_assistant.appconfig import AppConfig
 from osu_tablet_assistant.engine import adapt
 from osu_tablet_assistant.engine.adapt import PolicyMode
 from osu_tablet_assistant.engine.recommend import RADIAL_TABLET
@@ -199,6 +201,65 @@ class CoreScenarioTest(unittest.TestCase):
         self.assertIn("adapt.axis.motion", text)
 
 
+class StepLevelCoreTest(unittest.TestCase):
+    def test_default_is_normal_and_step_cycles(self) -> None:
+        core, sender, _, _ = make_core()
+        self.assertEqual(core.step_level, "normal")
+        self.assertEqual(core.status().step_level, "normal")
+        levels = [core.handle("step") for _ in range(3)]
+        self.assertEqual([fb.reasons[0].params["level"] for fb in levels], ["fine", "very_fine", "normal"])
+        self.assertTrue(all(fb.ok and fb.sound == "step" for fb in levels))
+        self.assertEqual(sender.calls, [])                 # choosing a step size sends nothing
+        self.assertEqual(core.tuner.change_count, 0)
+        with self.assertRaises(ValueError):
+            core.set_step_level("ultra")
+
+    def test_fine_moves_are_smaller_and_undo_keeps_the_level(self) -> None:
+        sizes = {}
+        for level in adapt.STEP_LEVELS:
+            core, _, _, _ = make_core()
+            core.set_step_level(level)
+            self.assertTrue(core.handle("smoother").ok)
+            sizes[level] = radial(core.tuner.settings)["OuterRadius"] - 0.6
+        self.assertGreater(sizes["normal"], sizes["fine"])
+        self.assertGreater(sizes["fine"], sizes["very_fine"])
+        self.assertGreater(sizes["very_fine"], 0)
+        core.handle("undo")
+        self.assertEqual(core.step_level, "very_fine")
+        self.assertEqual(core.tuner.settings, user_settings())
+
+    def test_fine_area_step_is_one_percent(self) -> None:
+        core, _, _, _ = make_core()
+        core.set_step_level("fine")
+        fb = core.handle("area_bigger")
+        self.assertEqual(fb.reasons[0].params["pct"], "1")
+        self.assertIn("1%", comp.action_label("area_bigger", "fine", i18n.t))
+        self.assertIn("0.5%", comp.action_label("area_smaller", "very_fine", i18n.t))
+
+    def test_fine_session_converges(self) -> None:
+        core, _, clock, _ = make_core()
+        core.set_step_level("very_fine")
+        sounds = []
+        for action in ["smoother", "smoother", "responsive", "smoother", "responsive", "smoother", "responsive"]:
+            sounds.append(core.handle(action).sound)
+            clock.now += 0.5
+            core.pump()
+        self.assertTrue(core.status().converged)
+        self.assertIn("converged", sounds)
+
+    def test_overlay_names_the_step_and_last_change_line(self) -> None:
+        core, _, _, _ = make_core()
+        core.set_step_level("fine")
+        fb = core.handle("smoother")
+        lines = comp.overlay_lines(fb, core.status(), i18n.t)
+        self.assertEqual(len(lines), 3)
+        self.assertIn(i18n.t("companion.step.fine"), lines[-1])
+        change = comp.last_change(fb, i18n.t)
+        self.assertIn("->", change)
+        self.assertIn("OuterRadius", change)
+        self.assertIsNone(comp.last_change(core.handle("step"), i18n.t))
+
+
 class SessionAdapterTest(unittest.TestCase):
     def test_uses_live_candidate_settings_and_public_attributes(self) -> None:
         cand = Candidate("c1", "l", "s", ProfileChanges(tablet_area=Rect(70, 40, 80, 27, 180)))
@@ -232,6 +293,8 @@ class LocaleKeysTest(unittest.TestCase):
         dynamic |= {f"companion.policy.{m.value}" for m in PolicyMode}
         dynamic |= {f"companion.flavor.{f}" for f in ("stable", "lazer", "unknown")}
         dynamic |= {f"adapt.axis.{a}" for a in adapt.AXES}
+        dynamic |= {f"companion.step.{lv}" for lv in adapt.STEP_LEVELS}
+        dynamic |= {f"companion.step.hint.{lv}" for lv in adapt.STEP_LEVELS}
         needed = {k for k in used | dynamic if not k.endswith(".")}
         self.assertEqual(sorted(needed - en), [])
         self.assertEqual(sorted(needed - es), [])
@@ -265,6 +328,57 @@ class FakeSampler:
         return [PenSample(i * 0.002, 500 + i % 2, 300) for i in range(50)]
 
 
+def hide(win) -> None:
+    """Tests never show a window on the desktop: fully transparent and far off-screen."""
+    try:
+        win.root.attributes("-alpha", 0.0)
+    except tk.TclError:
+        pass
+    win.root.geometry("+-20000+-20000")
+
+
+def make_window(root, width: int | None = None, **kw):
+    kw.setdefault("sender", Sender())
+    kw.setdefault("sampler", FakeSampler())
+    kw.setdefault("watcher", lt.OsuWatcher(lambda: []))
+    kw.setdefault("hotkey_backend", FakeBackend())
+    kw.setdefault("beeper", hk.Beeper(beep=lambda f, d: None, threaded=False))
+    kw.setdefault("overlay", False)
+    win = comp.open_companion(root, settings=user_settings(), tablet_name="Wacom CTL-472", tablet=CTL472,
+                              display=DISPLAY, **kw)
+    hide(win)
+    if width is not None:
+        win.root.geometry(f"{width}x700+-20000+-20000")
+    for _ in range(3):
+        win.root.update()
+    return win
+
+
+def layout_problems(win) -> list:
+    """Mapped widgets past the window's right edge, or text widgets narrower than their content."""
+    top = win.root
+    right = top.winfo_rootx() + top.winfo_width()
+    bad, stack = [], list(top.winfo_children())
+    while stack:
+        w = stack.pop()
+        stack.extend(w.winfo_children())
+        if not w.winfo_ismapped():
+            continue
+        if w.winfo_rootx() + w.winfo_width() > right + 1:
+            bad.append(("past right edge", str(w), w.winfo_rootx() + w.winfo_width() - right))
+        if w.winfo_class() in ("TButton", "TRadiobutton", "TCheckbutton", "TLabel", "Label", "TEntry") \
+                and w.winfo_reqwidth() > w.winfo_width() + 1:
+            bad.append(("squeezed", str(w), w.winfo_reqwidth(), w.winfo_width()))
+    return bad
+
+
+ALT = hk.TK_ALT_WIN if sys.platform == "win32" else hk.TK_MOD1
+
+
+def key(keysym: str, state: int = hk.TK_CONTROL | ALT, keycode: int = 0):
+    return SimpleNamespace(keysym=keysym, state=state, keycode=keycode)
+
+
 class HeadlessWindowTest(unittest.TestCase):
     def test_window_builds_runs_and_closes(self) -> None:
         try:
@@ -282,6 +396,7 @@ class HeadlessWindowTest(unittest.TestCase):
                 watcher=lt.OsuWatcher(lambda: [lt.ProcessEntry(9, "osu!.exe", r"C:\osu!\osu!.exe")]),
                 hotkey_backend=backend, beeper=hk.Beeper(beep=lambda f, d: tones.append(f), threaded=False),
                 available_filters={RADIAL_TABLET}, on_close=lambda: closed.append(True))
+            hide(win)
             root.update()
             self.assertTrue(sampler.started)
             self.assertTrue(win.hotkeys.running)
@@ -309,6 +424,127 @@ class HeadlessWindowTest(unittest.TestCase):
     def test_requires_settings(self) -> None:
         with self.assertRaises(ValueError):
             comp.CompanionWindow(None)
+
+
+class CompactPanelWindowTest(unittest.TestCase):
+    """The compact shortcut panel, the step selector and the shortcut editor (hidden windows only)."""
+
+    def setUp(self) -> None:
+        try:
+            self.root = tk.Tk()
+        except tk.TclError as exc:
+            self.skipTest(f"no display: {exc}")
+        self.root.withdraw()
+        self.addCleanup(self.root.destroy)
+        self.config = AppConfig()
+        self.saves: list[int] = []
+
+    def window(self, width: int | None = None, **kw):
+        kw.setdefault("config", self.config)
+        kw.setdefault("save_config", lambda: self.saves.append(1))
+        win = make_window(self.root, width, **kw)
+        self.addCleanup(win.destroy)
+        return win
+
+    def test_layout_fits_narrow_and_wide_windows(self) -> None:
+        for lang in ("es", "en"):
+            i18n.set_language(lang)
+            self.addCleanup(i18n.set_language, "es")
+            for width, cols, groups in ((640, 2, 1), (900, 4, 2)):
+                with self.subTest(lang=lang, width=width):
+                    win = self.window(width)
+                    self.assertEqual(win._panel_cols, cols)
+                    self.assertEqual(layout_problems(win), [])
+                    win.set_step("very_fine")
+                    win.do("smoother")
+                    win.toggle_bindings()
+                    for _ in range(3):
+                        win.root.update()
+                    self.assertTrue(win.keys_frame.winfo_ismapped())
+                    self.assertEqual(win._editor_groups, groups)
+                    self.assertEqual(layout_problems(win), [])
+                    win.destroy()
+
+    def test_panel_shows_what_each_key_does_and_the_step(self) -> None:
+        win = self.window()
+        smoother = win.intent_buttons["smoother"].cget("text")
+        self.assertIn(i18n.t("companion.action.smoother"), smoother)
+        self.assertIn("Ctrl+Alt+Up", smoother)
+        self.assertIn("Ctrl+Alt+PageUp", win.intent_buttons["area_bigger"].cget("text"))
+        self.assertIn(i18n.t("companion.step.normal"), win.var_step.get())
+        self.assertIn("Ctrl+Alt+P", win.var_step.get())
+        self.assertEqual(win.var_change.get(), i18n.t("companion.last.none"))
+        win.intent_buttons["smoother"].invoke()            # a click is the same as the hotkey
+        self.assertIn("->", win.var_change.get())
+        self.assertEqual(win.tuner.change_count, 1)
+
+    def test_step_selector_and_hotkey_are_saved(self) -> None:
+        win = self.window()
+        win.set_step("very_fine")
+        self.assertEqual((win.core.step_level, self.config.companion_step), ("very_fine", "very_fine"))
+        self.assertIn("0.5%", win.intent_buttons["area_bigger"].cget("text"))
+        win._actions.put("step")                            # as if Ctrl+Alt+P fired while playing
+        win._tick()
+        self.assertEqual((win.core.step_level, win.var_step_level.get()), ("normal", "normal"))
+        self.assertEqual(self.config.companion_step, "normal")
+        self.assertTrue(self.saves)
+        self.assertIn("2%", win.intent_buttons["area_bigger"].cget("text"))
+
+    def test_saved_choices_are_used_at_start(self) -> None:
+        self.config.companion_step = "fine"
+        self.config.companion_hotkeys = {**hk.DEFAULT_BINDINGS, "smoother": "ctrl+shift+up"}
+        win = self.window()
+        self.assertEqual(win.core.step_level, "fine")
+        self.assertEqual(win.hotkeys.bindings["smoother"], "ctrl+shift+up")
+        self.assertIn("Ctrl+Shift+Up", win.intent_buttons["smoother"].cget("text"))
+
+    def test_detect_takes_a_free_combination_and_rejects_a_taken_one(self) -> None:
+        win = self.window()
+        self.assertTrue(win.hotkeys.running)
+        win.start_detect("keep")
+        self.assertTrue(win.keys_open)
+        self.assertFalse(win.hotkeys.running)              # paused: our own combos must reach the window
+        self.assertEqual(win.feed_key(key("Up")), "break")
+        self.assertIn(i18n.t("companion.action.smoother"), win.keys_status.cget("text"))
+        self.assertEqual(win._detecting, "keep")
+        win.feed_key(key("j", state=0))
+        self.assertEqual(str(win.keys_status.cget("text")), i18n.t("companion.hotkeys.need_modifier"))
+        win.feed_key(key("Control_L"))                     # a modifier alone: keep waiting
+        self.assertEqual(win._detecting, "keep")
+        win.feed_key(key("j"))
+        self.assertIsNone(win._detecting)
+        self.assertTrue(win.hotkeys.running)
+        self.assertEqual(win.hotkeys.bindings["keep"], "ctrl+alt+j")
+        self.assertEqual(win.binding_vars["keep"].get(), "Ctrl+Alt+J")
+        self.assertEqual(self.config.companion_hotkeys["keep"], "ctrl+alt+j")
+        self.assertIn("Ctrl+Alt+J", win.intent_buttons["keep"].cget("text"))
+        win.start_detect("undo")
+        win.feed_key(key("Escape", state=0))
+        self.assertIsNone(win._detecting)
+        self.assertTrue(win.hotkeys.running)
+        self.assertEqual(win.hotkeys.bindings["undo"], "ctrl+alt+z")
+
+    def test_typed_bindings_invalid_duplicate_and_reset(self) -> None:
+        win = self.window()
+        win.toggle_bindings()
+        win.binding_vars["undo"].set("ctrl+banana")
+        self.assertFalse(win.apply_bindings())
+        self.assertEqual(win.hotkeys.bindings["undo"], "ctrl+alt+z")
+        self.assertTrue(win.hotkeys.running)
+        win.binding_vars["undo"].set("Ctrl+Alt+Up")          # same as "smoother"
+        self.assertFalse(win.apply_bindings())
+        self.assertEqual(self.saves, [])
+        win.binding_vars["undo"].set("ctrl+shift+z")
+        win.binding_vars["step"].set("")                     # no key for the step size
+        self.assertTrue(win.apply_bindings())
+        self.assertEqual(self.config.companion_hotkeys["undo"], "ctrl+shift+z")
+        self.assertEqual(self.config.companion_hotkeys["step"], "")
+        self.assertNotIn("Ctrl+Alt+P", win.var_step.get())
+        win.reset_bindings()
+        self.assertEqual(self.config.companion_hotkeys, hk.DEFAULT_BINDINGS)
+        self.assertEqual(win.hotkeys.bindings, hk.DEFAULT_BINDINGS)
+        win.toggle_bindings()
+        self.assertFalse(win.keys_open)
 
 
 if __name__ == "__main__":

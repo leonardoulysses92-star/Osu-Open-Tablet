@@ -37,13 +37,17 @@ VK: dict[str, int] = {
     **{f"num{d}": 0x60 + d for d in range(10)},
     **{f"f{n}": 0x6F + n for n in range(1, 25)},
 }
-ACTIONS = ("smoother", "responsive", "precise", "looser", "area_bigger", "area_smaller", "undo", "keep")
+ACTIONS = ("smoother", "responsive", "precise", "looser", "area_bigger", "area_smaller", "undo", "keep", "step")
 DEFAULT_BINDINGS: dict[str, str] = {
     "smoother": "ctrl+alt+up", "responsive": "ctrl+alt+down",
     "precise": "ctrl+alt+left", "looser": "ctrl+alt+right",
     "area_bigger": "ctrl+alt+pageup", "area_smaller": "ctrl+alt+pagedown",
     "undo": "ctrl+alt+z", "keep": "ctrl+alt+k",
+    "step": "ctrl+alt+p",            # cycles the step size: normal -> fine -> very fine ("Paso")
 }
+MAX_HOTKEY_TEXT = 40
+_KEY_LABELS = {"ctrl": "Ctrl", "alt": "Alt", "shift": "Shift", "win": "Win", "pageup": "PageUp",
+               "pagedown": "PageDown", "backspace": "Backspace"}
 
 
 class HotkeyError(ValueError):
@@ -95,6 +99,113 @@ def parse_bindings(bindings: Mapping[str, str]) -> tuple[dict[str, Hotkey], dict
         used[key] = action
         good[action] = hk
     return good, errors
+
+
+def display_hotkey(text: str) -> str:
+    """"ctrl+alt+pageup" -> "Ctrl+Alt+PageUp" (unparsable text is returned as typed)."""
+    try:
+        parts = parse_hotkey(text).text.split("+")
+    except HotkeyError:
+        return str(text)
+    return "+".join(_KEY_LABELS.get(p, p.upper() if len(p) == 1 else p.capitalize()) for p in parts)
+
+
+def conflict_with(bindings: Mapping[str, str], action: str, text: str) -> str | None:
+    """The other action already bound to the combination ``text`` (None when it is free)."""
+    try:
+        new = parse_hotkey(text)
+    except HotkeyError:
+        return None
+    for other, value in bindings.items():
+        if other == action or not value:
+            continue
+        try:
+            hk = parse_hotkey(value)
+        except HotkeyError:
+            continue
+        if (hk.modifiers, hk.vk) == (new.modifiers, new.vk):
+            return other
+    return None
+
+
+def clean_bindings(data: object) -> dict[str, str]:
+    """Bindings for every action from untrusted data (a saved config): never invalid, never duplicated.
+
+    Known actions with valid text keep it (normalised, e.g. "Alt+Ctrl+Up" -> "ctrl+alt+up"); "" means
+    "no hotkey". Missing or invalid entries get the default unless that combination is already taken,
+    in which case the action stays without a hotkey.
+    """
+    given = data if isinstance(data, Mapping) else {}
+    out: dict[str, str] = {}
+    used: set[tuple[int, int]] = set()
+
+    def take(text: object) -> str | None:
+        if not isinstance(text, str) or len(text) > MAX_HOTKEY_TEXT:
+            return None
+        if not text.strip():
+            return ""
+        try:
+            hk = parse_hotkey(text)
+        except HotkeyError:
+            return None
+        if (hk.modifiers, hk.vk) in used:
+            return None
+        used.add((hk.modifiers, hk.vk))
+        return hk.text
+
+    pending = []
+    for action in ACTIONS:             # the user's own choices first, so a default never pushes them out
+        value = take(given.get(action)) if action in given else None
+        if value is None:
+            pending.append(action)
+        else:
+            out[action] = value
+    for action in pending:
+        out[action] = take(DEFAULT_BINDINGS[action]) or ""
+    return {a: out[a] for a in ACTIONS}
+
+
+# Tk key events -> hotkey text (the "Detect" button of the shortcut editor). Windows Tk reports Alt as
+# 0x20000 in ``event.state`` (0x8 is Num Lock there); X11 uses Mod1 = 0x8.
+TK_SHIFT, TK_CONTROL, TK_MOD1, TK_ALT_WIN = 0x1, 0x4, 0x8, 0x20000
+_TK_MODIFIER_KEYS = {"shift_l", "shift_r", "control_l", "control_r", "alt_l", "alt_r", "meta_l", "meta_r",
+                     "super_l", "super_r", "win_l", "win_r", "caps_lock", "num_lock", "iso_level3_shift",
+                     "app", "menu", "scroll_lock"}
+_TK_KEYSYMS = {"prior": "pageup", "next": "pagedown", "return": "enter", "kp_enter": "enter",
+               "kp_add": "plus", "kp_subtract": "minus", "equal": "plus"}
+_VK_NAMES = {code: name for name, code in VK.items()}
+
+
+def combo_from_tk_event(event: object, windows: bool | None = None) -> tuple[str | None, str]:
+    """Hotkey text for one Tk ``<KeyPress>`` and a status: "ok", "wait" (a modifier alone), "escape",
+    "no_modifier" (a key without Ctrl/Alt/Shift) or "unknown" (a key that cannot be a hotkey)."""
+    keysym = str(getattr(event, "keysym", "") or "")
+    low = keysym.lower()
+    if low == "escape":
+        return None, "escape"
+    if not low or low in _TK_MODIFIER_KEYS:
+        return None, "wait"
+    windows = sys.platform == "win32" if windows is None else windows
+    state = getattr(event, "state", 0)
+    state = state if isinstance(state, int) else 0
+    mods = [name for name, on in (("ctrl", state & TK_CONTROL), ("alt", state & (TK_ALT_WIN if windows else TK_MOD1)),
+                                  ("shift", state & TK_SHIFT)) if on]
+    key: str | None = None
+    if low.startswith("kp_") and low[3:].isdigit():
+        key = f"num{low[3:]}"
+    elif low in _TK_KEYSYMS:
+        key = _TK_KEYSYMS[low]
+    elif low in VK:
+        key = low
+    if key is None and windows:            # Windows: keycode is the virtual-key code (any layout)
+        code = getattr(event, "keycode", None)
+        if isinstance(code, int):
+            key = _VK_NAMES.get(code)
+    if key is None:
+        return None, "unknown"
+    if not mods:
+        return None, "no_modifier"
+    return parse_hotkey("+".join(mods + [key])).text, "ok"
 
 
 # --------------------------------------------------------------------------
@@ -225,13 +336,17 @@ class HotkeyManager:
             self.backend.wake()
         thread.join(timeout_s)
 
-    def rebind(self, bindings: Mapping[str, str]) -> dict[str, bool]:
-        """Stop, take new bindings, start again."""
+    def set_bindings(self, bindings: Mapping[str, str]) -> None:
+        """Take new bindings without registering them (call :meth:`start` afterwards); stops a running thread."""
         self.stop()
         self.bindings = dict(bindings)
         self.hotkeys, self.errors = parse_bindings(self.bindings)
         self.registered, self.conflicts = {}, []
         self._ids = {i + 1: action for i, action in enumerate(self.hotkeys)}
+
+    def rebind(self, bindings: Mapping[str, str]) -> dict[str, bool]:
+        """Stop, take new bindings, start again."""
+        self.set_bindings(bindings)
         return self.start()
 
 
@@ -247,6 +362,7 @@ PATTERNS: dict[str, tuple[tuple[int, int], ...]] = {   # (frequency Hz, duration
     "area_smaller": ((800, 50), (650, 50), (500, 60)),
     "undo": ((330, 160),),
     "keep": ((523, 70), (659, 70), (784, 120)),
+    "step": ((700, 40), (700, 40), (700, 40)),
     "limit": ((260, 70), (260, 70)),
     "converged": ((784, 80), (1047, 160)),
     "error": ((200, 300),),

@@ -78,6 +78,30 @@ class AppConfigTests(unittest.TestCase):
             self.assertEqual((cfg.click_keys, cfg.pen_clicks), expected, data)
         self.assertEqual(ac.from_dict({"analysis_detail": "ultra"}).analysis_detail, "fine")
 
+    def test_companion_hotkeys_and_step_round_trip(self) -> None:
+        defaults = ac.AppConfig()
+        self.assertEqual(defaults.companion_step, "normal")                 # nothing changes after upgrading
+        self.assertEqual(defaults.companion_hotkeys["smoother"], "ctrl+alt+up")
+        keys = {**defaults.companion_hotkeys, "smoother": "ctrl+shift+up", "step": ""}
+        ac.save_config(ac.AppConfig(companion_hotkeys=keys, companion_step="very_fine"), self.path)
+        loaded = ac.load_config(self.path)
+        self.assertEqual(loaded.companion_step, "very_fine")
+        self.assertEqual(loaded.companion_hotkeys, keys)
+
+    def test_companion_fields_are_validated(self) -> None:
+        cfg = ac.from_dict({"companion_step": "ultra", "companion_hotkeys": ["ctrl+alt+up"]})
+        self.assertEqual((cfg.companion_step, cfg.companion_hotkeys), ("normal", ac.AppConfig().companion_hotkeys))
+        cfg = ac.from_dict({"companion_hotkeys": {"keep": "ctrl+alt+up", "smoother": "ctrl+alt+up",
+                                                  "undo": "nope", "evil": "ctrl+alt+e"}})
+        self.assertEqual(cfg.companion_hotkeys["smoother"], "ctrl+alt+up")
+        self.assertEqual(cfg.companion_hotkeys["keep"], "ctrl+alt+k")    # the repeated one falls back to its default
+        self.assertEqual(cfg.companion_hotkeys["undo"], "ctrl+alt+z")
+        self.assertNotIn("evil", cfg.companion_hotkeys)
+        from osu_tablet_assistant.gui import hotkeys as hk
+        self.assertEqual(hk.parse_bindings(cfg.companion_hotkeys)[1], {})
+        old = ac.from_dict({"language": "en"})                         # files from before these fields
+        self.assertEqual((old.companion_step, old.companion_hotkeys), ("normal", ac.AppConfig().companion_hotkeys))
+
     def test_preset_file_name(self) -> None:
         now = datetime(2026, 10, 30, 14, 5, 9)
         self.assertEqual(ac.preset_file_name(ac.DEFAULT_NAME_TEMPLATE, "Wacom CTL-472", now),

@@ -32,7 +32,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
-from ..knowledge.filters import FilterSpec, load_catalog
+from ..knowledge.filters import FINEST_GRID_DIVISOR, FilterSpec, load_catalog
 from ..models import ApplyResult, ProfileChanges, ProfileInfo, Reason, Rect, TabletSpec
 from . import settings_io
 
@@ -125,7 +125,8 @@ def enforce_bounds(old: dict, new: dict, tablet_name: str, catalog: Mapping[str,
             param = spec.param(prop)
             if param is None or (prop in old_vals and old_vals[prop] == value):
                 continue
-            clamped = param.clamp(value)
+            # bounds always; the grid is the finest one the companion's fine step levels may use
+            clamped = param.clamp(value, grid=param.grid(FINEST_GRID_DIVISOR))
             if clamped != value:
                 notes.append(Reason("livetune.clamped", {"filter": spec.display_name, "param": prop,
                                                          "value": value, "new": clamped}))

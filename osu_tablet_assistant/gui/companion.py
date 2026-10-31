@@ -8,8 +8,11 @@ Three layers:
 * :class:`Overlay`: a tiny always-on-top, click-through, non-activating
   window that shows the last change and fades out (hidden by exclusive
   fullscreen, hence the beeps from ``gui.hotkeys``).
-* :class:`CompanionWindow`: a normal window with big buttons, a quick
+* :class:`CompanionWindow`: a normal window with a compact shortcut panel
+  (small buttons that show their key combination, the step-size selector,
+  the last change and a "Shortcuts" editor with Detect / Reset), a quick
   "how did that map feel?" poll, policy selector, live numbers, Undo/Keep.
+  Hotkeys and step size are saved in the assistant's config.
 
 Integration (wizard)::
 
@@ -44,8 +47,8 @@ from ..otd.livetune import (LiveTuner, OsuWatcher, SendOutcome, controller_sende
 from . import hotkeys as hk
 from .i18n import t as default_t
 from .palette import COLORS, mix
-from .widgets import (FONT_FAMILY, Card, apply_theme, button, check, dark_title_bar, font, frame, label, px, radio,
-                      segmented, surface_color)
+from .widgets import (FONT_FAMILY, Card, Columns, ScrollFrame, WrapLabel, apply_theme, button, check,
+                      dark_title_bar, font, frame, label, px, radio, segmented, surface_color)
 
 BG, SURFACE, FG, MUTED, ACCENT, WARN = COLORS.bg, COLORS.surface, COLORS.text, COLORS.muted, COLORS.accent, COLORS.warn
 FONT = FONT_FAMILY
@@ -53,19 +56,33 @@ TICK_MS = 40
 SAMPLE_DRAIN_S = 0.5
 HINT_REFRESH_S = 2.0
 WATCH_INTERVAL_S = 3.0
+COLUMNS_BREAKPOINT = 820          # px of content width for the two lower columns
 INTENT_ACTIONS = ("smoother", "responsive", "precise", "looser", "area_bigger", "area_smaller")
 
 Translate = Callable[..., str]
 
 
 def say(reason: Reason, translate: Translate = default_t) -> str:
-    """Translate a Reason, also translating ``axis``/``strength`` parameter values."""
+    """Translate a Reason, also translating ``axis``/``strength``/``level`` parameter values."""
     params = dict(reason.params)
     if "axis" in params:
         params["axis"] = translate(f"adapt.axis.{params['axis']}")
     if "strength" in params:
         params["strength"] = translate(f"passive.strength.{params['strength']}")
+    if "level" in params:
+        params["level"] = translate(f"companion.step.{params['level']}")
     return translate(reason.key, **params)
+
+
+def action_label(action: str, level: str = adapt.DEFAULT_STEP_LEVEL, translate: Translate = default_t) -> str:
+    """Plain name of an action; the area actions show the percentage of the current step level."""
+    return translate(f"companion.action.{action}", pct=adapt.fmt(adapt.area_step_pct(level)))
+
+
+def step_hint(level: str, translate: Translate = default_t) -> str:
+    """"Fine (about 0.4x, area 1%)" for the status line."""
+    return translate("companion.step.with_hint", level=translate(f"companion.step.{level}"),
+                     hint=translate(f"companion.step.hint.{level}", pct=adapt.fmt(adapt.area_step_pct(level))))
 
 
 # --------------------------------------------------------------------------
@@ -102,15 +119,21 @@ class CompanionStatus:
     values: tuple[LiveValue, ...]
     area: tuple[float, float, float]           # width mm, height mm, rotation
     accepted: int
+    step_level: str = adapt.DEFAULT_STEP_LEVEL
 
 
 class CompanionCore:
-    """Intent handling on top of a :class:`LiveTuner`; the adaptation state is the tuner's meta."""
+    """Intent handling on top of a :class:`LiveTuner`; the adaptation state is the tuner's meta.
+
+    ``step_level`` (normal / fine / very_fine) is a view setting, not part of the undo history: undo
+    restores values, never the step size.
+    """
 
     def __init__(self, tuner: LiveTuner, *, policy: TuningPolicy | None = None,
                  catalog: Mapping[str, FilterSpec] | None = None, monitor: PassiveMonitor | None = None,
-                 display: DisplaySpec | None = None) -> None:
+                 display: DisplaySpec | None = None, step_level: str | None = None) -> None:
         self.tuner = tuner
+        self.step_level = adapt.step_level(step_level)
         self.policy = policy or TuningPolicy()
         self.catalog = dict(catalog) if catalog is not None else load_catalog()
         self.display = display
@@ -135,12 +158,26 @@ class CompanionCore:
     def set_policy(self, mode: PolicyMode | str) -> None:
         self.policy = TuningPolicy(PolicyMode(mode), self.policy.installed)
 
+    def set_step_level(self, level: str) -> Feedback:
+        """Choose the step size of the next moves (raises ValueError for an unknown level)."""
+        self.step_level = adapt.step_level(level)
+        fb = Feedback("step", True, "step", (Reason("companion.step.now", {"level": self.step_level}),),
+                      converged=adapt.is_converged(self.state))
+        self.last = fb
+        return fb
+
+    def cycle_step(self) -> Feedback:
+        """Normal -> fine -> very fine -> normal (the "step" hotkey)."""
+        return self.set_step_level(adapt.next_step_level(self.step_level))
+
     def handle(self, action: str) -> Feedback:
-        """Run one action: an intent name, "undo" or "keep"."""
+        """Run one action: an intent name, "undo", "keep" or "step" (next step size)."""
         if action == "undo":
             fb = self.undo()
         elif action == "keep":
             fb = self.keep()
+        elif action == "step":
+            fb = self.cycle_step()
         else:
             fb = self._intent(Intent(action))
         self.last = fb
@@ -151,7 +188,8 @@ class CompanionCore:
         if intent is Intent.AREA_BIGGER and self.tuner.tablet is None:
             return Feedback(action, False, "limit", (Reason("companion.area.need_tablet"),))
         was_converged = adapt.is_converged(self.state)
-        res = adapt.step(self.state, self.tuner.profile(), intent, self.policy, self.catalog, self.tuner.tablet)
+        res = adapt.step(self.state, self.tuner.profile(), intent, self.policy, self.catalog, self.tuner.tablet,
+                         level=self.step_level)
         if not res.moved:
             return Feedback(action, False, "limit", res.reasons, res.suggestions, res.skipped, res.converged)
         self.monitor.mark_change()
@@ -225,15 +263,25 @@ class CompanionCore:
             positions={a: st.axis(a).position for a in adapt.AXES},
             gains={a: st.axis(a).gain for a in adapt.AXES}, values=tuple(values),
             area=(prof.tablet_area.width, prof.tablet_area.height, prof.tablet_area.rotation),
-            accepted=len(st.accepted))
+            accepted=len(st.accepted), step_level=self.step_level)
+
+
+CHANGE_KEYS = ("adapt.change", "adapt.area.change", "adapt.enabled", "adapt.added")
+
+
+def last_change(fb: Feedback, translate: Translate = default_t) -> str | None:
+    """The value change of ``fb`` in one line ("Radial Follow · OuterRadius: 0.6 -> 0.62 mm"), or None."""
+    changes = [say(r, translate) for r in fb.reasons if r.key in CHANGE_KEYS]
+    return "; ".join(changes) if changes and fb.ok else None
 
 
 def overlay_lines(fb: Feedback, status: CompanionStatus, translate: Translate = default_t) -> list[str]:
-    """Up to three short lines for the overlay."""
-    lines = [translate(f"companion.action.{fb.action}")]
+    """Up to three short lines for the overlay; the last one always names the step size in use."""
+    lines = [action_label(fb.action, status.step_level, translate)]
     if fb.reasons:
         lines.append(say(fb.reasons[0], translate))
     tail = translate("companion.overlay.count", n=status.changes)
+    tail += " · " + translate("companion.overlay.step", level=translate(f"companion.step.{status.step_level}"))
     if status.converged:
         tail += " · " + translate("companion.overlay.converged")
     elif status.dirty:
@@ -341,8 +389,14 @@ class CompanionWindow:
                  enable_hotkeys: bool = True, bindings: Mapping[str, str] | None = None,
                  hotkey_backend: hk.HotkeyBackend | None = None, beeper: hk.Beeper | None = None,
                  overlay: bool = True, on_keep: Callable[[dict], None] | None = None,
-                 on_close: Callable[[], None] | None = None) -> None:
+                 on_close: Callable[[], None] | None = None, step_level: str | None = None,
+                 config: Any = None, save_config: Callable[[], Any] | None = None) -> None:
         args = companion_args_from_session(session) if session is not None else {}
+        # The assistant's own config (appconfig.AppConfig): saved hotkeys and step size survive restarts.
+        self.config = config if config is not None else getattr(session, "app_config", None)
+        if save_config is None and session is not None and hasattr(session, "save_app_config"):
+            save_config = session.save_app_config
+        self._persist = save_config
         settings = settings if settings is not None else args.get("settings")
         tablet_name = tablet_name or args.get("tablet_name")
         if settings is None or not tablet_name:
@@ -362,13 +416,22 @@ class CompanionWindow:
             sender = dry_run_sender if dry_run or controller is None else controller_sender(controller)
         self.tuner = LiveTuner(settings, tablet_name, sender, config_dir=config_dir, tablet=tablet,
                                can_keep=not dry_run, **dict(tuner_options or {}))
+        if step_level is None:
+            saved = getattr(self.config, "companion_step", None)
+            step_level = saved if saved in adapt.STEP_LEVELS else adapt.DEFAULT_STEP_LEVEL
         self.core = CompanionCore(self.tuner, policy=TuningPolicy(PolicyMode(policy), frozenset(available)),
-                                  display=display)
+                                  display=display, step_level=step_level)
         self.watcher = watcher if watcher is not None else OsuWatcher(interval_s=WATCH_INTERVAL_S)
         self.beeper = beeper if beeper is not None else hk.Beeper()
         self._actions: queue.Queue[str] = queue.Queue()
-        self.hotkeys = hk.HotkeyManager(dict(bindings or hk.DEFAULT_BINDINGS), self._actions.put,
+        if bindings is None:
+            saved_keys = getattr(self.config, "companion_hotkeys", None)
+            bindings = hk.clean_bindings(saved_keys) if saved_keys is not None else hk.DEFAULT_BINDINGS
+        self.hotkeys = hk.HotkeyManager(dict(bindings), self._actions.put,
                                         backend=hotkey_backend, use_default_backend=hotkey_backend is None)
+        self._hotkeys_enabled = enable_hotkeys
+        self._detecting: str | None = None
+        self._last_change = ""
         self.sampler = sampler
         if self.sampler is None and passive:
             from .pen_sampler import PenSampler
@@ -383,8 +446,14 @@ class CompanionWindow:
         self.root.title(self.t("companion.title"))
         self.root.configure(bg=BG)
         dark_title_bar(self.root)
-        self.root.minsize(880, 600)
+        self.root.minsize(px(self.root, 560), px(self.root, 420))
         self.root.protocol("WM_DELETE_WINDOW", self.close)
+        # A fixed size from the start: a toplevel that follows its requested size lets wrapping labels and
+        # the reflowing grids feed back on each other (the window kept growing and froze). The content
+        # scrolls vertically and reflows to the width instead.
+        width = min(px(self.root, 900), self.root.winfo_screenwidth() - 40)
+        height = min(px(self.root, 820), self.root.winfo_screenheight() - 80)
+        self.root.geometry(f"{max(width, 560)}x{max(height, 420)}")
         self._build()
         self.overlay = Overlay(self.root) if overlay else None
         if enable_hotkeys and self.hotkeys.available:
@@ -404,10 +473,21 @@ class CompanionWindow:
         role = self._FONT_ROLE.get(size, "body")
         if bold and role in ("body", "small"):
             role = "strong" if role == "body" else "small_bold"
+        # Starts narrow and re-wraps to the width it is given, so long lines never widen the window.
         lbl = tk.Label(parent, text=self.t(key) if key else "", textvariable=var, bg=surface_color(parent), fg=color,
-                       font=font(role), justify="left", anchor="w", wraplength=px(parent, wrap))
+                       font=font(role), justify="left", anchor="w", wraplength=px(parent, min(wrap, 300)))
         lbl.pack(fill="x", anchor="w")
+        lbl.bind("<Configure>", self._rewrap, add="+")
         return lbl
+
+    @staticmethod
+    def _rewrap(event: Any) -> None:
+        wrap = max(int(event.width) - 8, 80)
+        try:
+            if abs(float(str(event.widget.cget("wraplength"))) - wrap) > 1:
+                event.widget.configure(wraplength=wrap)
+        except (tk.TclError, ValueError):
+            pass
 
     def _button(self, parent: tk.Misc, text: str, command: Callable[[], None], accent: bool = False,
                 big: bool = False) -> ttk.Button:
@@ -419,64 +499,52 @@ class CompanionWindow:
         return card.body
 
     def _hint(self, action: str) -> str:
+        """The key combination of ``action`` as the player reads it ("Ctrl+Alt+Up"), or "no key"."""
         text = self.hotkeys.bindings.get(action, "")
-        return text.replace("+", " + ").title() if text else ""
+        return hk.display_hotkey(text) if text else self.t("companion.hotkeys.none")
+
+    def _action_text(self, action: str) -> str:
+        return action_label(action, self.core.step_level, self.t)
+
+    # Compact shortcut panel: what each key does, 4 small buttons per row (click = the same as the hotkey).
+    PANEL_ROWS = (("smoother", "responsive", "precise", "looser"), ("area_smaller", "area_bigger", "undo", "keep"))
 
     def _build(self) -> None:
-        outer = ttk.Frame(self.root, padding=(px(self.root, 20), px(self.root, 14)))
+        # Everything scrolls vertically and reflows to the window width (nothing is cut on the right).
+        self.scroll = ScrollFrame(self.root)
+        self.scroll.pack(fill="both", expand=True)
+        outer = ttk.Frame(self.scroll.body, padding=(px(self.root, 16), px(self.root, 10)))
         outer.pack(fill="both", expand=True)
         self.body = outer
-        self._label(outer, "companion.title", 16)
+        self._label(outer, "companion.title", 11)
         self.var_game = tk.StringVar()
         self.var_live = tk.StringVar()
-        self._label(outer, var=self.var_game, color=MUTED)
-        self._label(outer, var=self.var_live, color=WARN)
+        self._label(outer, var=self.var_game, size=9, color=MUTED)
+        self._label(outer, var=self.var_live, size=9, color=WARN)
         if self.dry_run:
-            self._label(outer, "companion.dry_run", color=WARN)
+            self._label(outer, "companion.dry_run", 9, WARN)
         if self.session is not None and not self.own_root:
-            self._button(outer, self.t("companion.open_coach"), self.open_coach).pack(anchor="w", pady=(6, 0))
-        cols = frame(outer)
-        cols.pack(fill="both", expand=True, pady=(px(outer, 10), 0))
+            self._button(outer, self.t("companion.open_coach"), self.open_coach).pack(anchor="w", pady=(4, 0))
+        self._build_panel(outer)
+        self._build_keys_editor(outer)
+
+        # two columns on a wide window, one below the breakpoint
+        cols = Columns(outer, breakpoint=px(outer, COLUMNS_BREAKPOINT), gap=10)
+        self.columns = cols
+        cols.pack(fill="x")
         left = frame(cols)
         right = frame(cols)
-        left.grid(row=0, column=0, sticky="nsew", padx=(0, px(outer, 10)))
-        right.grid(row=0, column=1, sticky="nsew")
-        cols.columnconfigure(0, weight=1, uniform="col")
-        cols.columnconfigure(1, weight=1, uniform="col")
-        gap = px(outer, 3)
+        cols.add(left)
+        cols.add(right)
 
-        feel = self._section(left, "companion.section.feel")
-        grid = frame(feel)
-        grid.pack(fill="x")
-        self.intent_buttons: dict[str, ttk.Button] = {}
-        for i, action in enumerate(("smoother", "responsive", "precise", "looser")):
-            text = f"{self.t(f'companion.action.{action}')}\n{self._hint(action)}"
-            b = self._button(grid, text, lambda a=action: self.do(a), big=True)
-            b.grid(row=i // 2, column=i % 2, sticky="nsew", padx=gap, pady=gap)
-            self.intent_buttons[action] = b
-        grid.columnconfigure(0, weight=1)
-        grid.columnconfigure(1, weight=1)
-        self._label(feel, "companion.feel.help", 9, MUTED)
-
-        area = self._section(left, "companion.section.area")
-        row = frame(area)
-        row.pack(fill="x")
-        for action in ("area_smaller", "area_bigger"):
-            b = self._button(row, f"{self.t(f'companion.action.{action}')}  ({self._hint(action)})",
-                             lambda a=action: self.do(a))
-            b.pack(side="left", expand=True, fill="x", padx=gap)
-            self.intent_buttons[action] = b
-        self._label(area, "companion.area.help", 9, MUTED)
-
-        save = frame(left)
-        save.pack(fill="x", pady=(0, px(outer, 10)))
-        self._button(save, f"{self.t('companion.action.undo')}  ({self._hint('undo')})",
-                     lambda: self.do("undo")).pack(side="left", expand=True, fill="x", padx=gap)
-        self.keep_button = self._button(save, f"{self.t('companion.action.keep')}  ({self._hint('keep')})",
-                                        lambda: self.do("keep"), accent=True)
-        self.keep_button.pack(side="left", expand=True, fill="x", padx=gap)
-        self._button(save, self.t("companion.action.revert"), self.revert_all).pack(
-            side="left", expand=True, fill="x", padx=gap)
+        live = self._section(left, "companion.section.live")
+        self.var_values = tk.StringVar()
+        self.var_last = tk.StringVar()
+        self.var_hints = tk.StringVar()
+        self._label(live, var=self.var_values, size=9)
+        self._label(live, var=self.var_last, size=9, color=ACCENT)
+        self._label(live, var=self.var_hints, size=9, color=MUTED)
+        self._button(live, self.t("companion.action.revert"), self.revert_all).pack(anchor="w", pady=(6, 0))
 
         poll = self._section(left, "companion.section.poll")
         self.var_motion = tk.StringVar(value="")
@@ -484,62 +552,310 @@ class CompanionWindow:
         for var, options, prefix in ((self.var_motion, adapt.POLL_MOTION, "motion"),
                                      (self.var_rest, adapt.POLL_REST, "rest")):
             line = segmented(poll)
-            line.pack(fill="x", pady=(0, px(outer, 6)))
+            line.pack(fill="x", pady=(0, px(outer, 4)))
             for opt in options:
                 ttk.Radiobutton(line, text=self.t(f"companion.poll.{prefix}.{opt}"), variable=var, value=opt,
                                 style="Segment.Toolbutton", takefocus=True).pack(side="left", expand=True, fill="x")
         self._button(poll, self.t("companion.poll.send"), self.send_poll).pack(fill="x", pady=(px(outer, 2), 0))
 
-        live = self._section(right, "companion.section.live")
-        self.var_values = tk.StringVar()
-        self.var_last = tk.StringVar()
-        self.var_hints = tk.StringVar()
-        self._label(live, var=self.var_values, size=10, wrap=380)
-        self._label(live, var=self.var_last, size=10, color=ACCENT, wrap=380)
-        self._label(live, var=self.var_hints, size=9, color=MUTED, wrap=380)
-
         pol = self._section(right, "companion.section.policy")
         self.var_policy = tk.StringVar(value=self.core.policy.mode.value)
-        for mode in PolicyMode:
-            radio(pol, self.t(f"companion.policy.{mode.value}"), mode.value, self.var_policy,
-                  command=self._policy_changed).pack(anchor="w")
+        for mode in PolicyMode:   # a radio with no text plus a wrapping label: long choices never widen the card
+            row = frame(pol)
+            row.pack(fill="x", anchor="w")
+            radio(row, "", mode.value, self.var_policy, command=self._policy_changed).pack(side="left", anchor="n")
+            text = WrapLabel(row, self.t(f"companion.policy.{mode.value}"), "Body")
+            text.pack(side="left", fill="x", expand=True)
+            text.bind("<Button-1>", lambda _e, m=mode.value: (self.var_policy.set(m), self._policy_changed()))
 
         opts = self._section(right, "companion.section.options")
         self.var_sound = tk.BooleanVar(value=self.beeper.enabled)
         check(opts, self.t("companion.option.sound"), self.var_sound, command=self._sound_changed).pack(anchor="w")
         self.var_keys = tk.StringVar()
-        self._label(opts, var=self.var_keys, size=9, color=MUTED, wrap=380)
+        self._label(opts, var=self.var_keys, size=9, color=MUTED)
+        self._label(outer, "companion.limits", 8, MUTED)
+
+    def _build_panel(self, outer: tk.Misc) -> None:
+        """The compact shortcut strip: step selector, "Shortcuts" button, 8 small buttons, one status line."""
+        card = Card(outer, self.t("companion.section.keys"), padding=12)
+        card.pack(fill="x", pady=(px(outer, 8), px(outer, 8)))
+        self.panel = card
+        bar = frame(card.body)
+        bar.pack(fill="x", pady=(0, px(outer, 4)))
+        label(bar, self.t("companion.step.title"), "Small").pack(side="left", padx=(0, px(outer, 6)))
+        self.var_step_level = tk.StringVar(value=self.core.step_level)
+        seg = segmented(bar)
+        seg.pack(side="left")
+        self.step_buttons: dict[str, ttk.Radiobutton] = {}
+        for level in adapt.STEP_LEVELS:
+            rb = ttk.Radiobutton(seg, text=self.t(f"companion.step.{level}"), variable=self.var_step_level,
+                                 value=level, style="Segment.Toolbutton", takefocus=True,
+                                 command=lambda: self.set_step(self.var_step_level.get()))
+            rb.pack(side="left")
+            self.step_buttons[level] = rb
+        self.keys_toggle = button(bar, self.t("companion.hotkeys.button"), self.toggle_bindings, kind="ghost")
+        self.keys_toggle.pack(side="right")
+        self.panel_grid = grid = frame(card.body)
+        grid.pack(fill="x")
+        self.intent_buttons: dict[str, ttk.Button] = {}
+        for row in self.PANEL_ROWS:
+            for action in row:
+                b = button(grid, "", lambda a=action: self.do(a), kind="primary" if action == "keep" else "secondary")
+                self.intent_buttons[action] = b
+        self.keep_button = self.intent_buttons["keep"]
+        self._panel_cols = 0
+        self.var_step = tk.StringVar()
+        self.var_change = tk.StringVar()
+        self._label(card.body, var=self.var_step, size=9, color=ACCENT, bold=True).pack_configure(
+            pady=(px(outer, 4), 0))
+        self._label(card.body, var=self.var_change, size=9)
+        self._refresh_buttons()
+        self._layout_panel(4)
+        card.body.bind("<Configure>", lambda e: self._layout_panel(self._panel_columns_for(e.width)), add="+")
+
+    def _panel_columns_for(self, width: int) -> int:
+        """4 buttons per row when they fit at their natural width, else 2."""
+        gap = px(self.body, 2)
+        need = 4 * max(b.winfo_reqwidth() for b in self.intent_buttons.values()) + 8 * gap
+        return 4 if width >= need else 2
+
+    def _layout_panel(self, cols: int) -> None:
+        if cols == self._panel_cols:
+            return
+        self._panel_cols = cols
+        gap = px(self.body, 2)
+        order = [a for row in self.PANEL_ROWS for a in row]
+        for i, action in enumerate(order):
+            self.intent_buttons[action].grid(row=i // cols, column=i % cols, sticky="nsew", padx=gap, pady=gap)
+        for c in range(4):
+            self.panel_grid.columnconfigure(c, weight=1 if c < cols else 0, uniform="key" if c < cols else "")
+
+    def _build_keys_editor(self, outer: tk.Misc) -> None:
+        """The hotkey editor (hidden until "Shortcuts" is pressed): Detect, type, apply, reset."""
+        card = Card(outer, self.t("companion.hotkeys.title"), padding=12)
+        self.keys_frame = card
+        self.keys_open = False
+        WrapLabel(card.body, self.t("companion.hotkeys.intro"), "Small").pack(fill="x")
+        self.keys_rows = rows = frame(card.body)
+        rows.pack(fill="x", pady=(px(outer, 4), px(outer, 4)))
         self.binding_vars: dict[str, tk.StringVar] = {}
-        self.keys_frame = keys = frame(opts)
-        self._button(opts, self.t("companion.hotkeys.edit"), self.toggle_bindings).pack(fill="x", pady=(4, 0))
-        for i, action in enumerate(hk.ACTIONS):
-            label(keys, self.t(f"companion.action.{action}"), "Small").grid(row=i, column=0, sticky="w")
-            var = tk.StringVar(value=self.hotkeys.bindings.get(action, ""))
-            ttk.Entry(keys, textvariable=var, width=22).grid(row=i, column=1, sticky="ew", padx=4, pady=1)
+        self.binding_labels: dict[str, ttk.Label] = {}
+        self.binding_entries: dict[str, ttk.Entry] = {}
+        self.detect_buttons: dict[str, ttk.Button] = {}
+        for action in hk.ACTIONS:
+            self.binding_labels[action] = label(rows, self._action_text(action), "Small")
+            var = tk.StringVar(value=self._display(self.hotkeys.bindings.get(action, "")))
+            self.binding_entries[action] = ttk.Entry(rows, textvariable=var, width=16)
+            self.detect_buttons[action] = button(rows, self.t("companion.hotkeys.detect"),
+                                                 lambda a=action: self.toggle_detect(a), kind="ghost")
             self.binding_vars[action] = var
-        keys.columnconfigure(1, weight=1)
-        self._button(keys, self.t("companion.hotkeys.apply"), self.apply_bindings).grid(
-            row=len(hk.ACTIONS), column=0, columnspan=2, sticky="ew", pady=(4, 0))
-        self._label(outer, "companion.limits", 8, MUTED, wrap=860)
+        self._editor_groups = 0
+        self._layout_editor(1)
+        line = frame(card.body)
+        line.pack(fill="x")
+        button(line, self.t("companion.hotkeys.apply"), self.apply_bindings, kind="secondary").pack(side="left")
+        button(line, self.t("companion.hotkeys.reset"), self.reset_bindings, kind="ghost").pack(
+            side="left", padx=(px(outer, 6), 0))
+        self.keys_status = WrapLabel(card.body, "", "Small")
+        self.keys_status.pack(fill="x", pady=(px(outer, 4), 0))
+        WrapLabel(card.body, self.t("companion.hotkeys.notes"), "Small").pack(fill="x")
+        card.body.bind("<Configure>", lambda e: self._layout_editor(self._editor_groups_for(e.width)), add="+")
+
+    def _editor_groups_for(self, width: int) -> int:
+        """Two groups of rows side by side when they fit, else one column."""
+        gap = px(self.body, 12)
+        need = (max(w.winfo_reqwidth() for w in self.binding_labels.values())
+                + max(w.winfo_reqwidth() for w in self.binding_entries.values())
+                + max(w.winfo_reqwidth() for w in self.detect_buttons.values()) + px(self.body, 8))
+        return 2 if width >= 2 * need + gap else 1
+
+    def _layout_editor(self, groups: int) -> None:
+        if groups == self._editor_groups:
+            return
+        self._editor_groups = groups
+        per = (len(hk.ACTIONS) + groups - 1) // groups
+        pad = px(self.body, 4)
+        for i, action in enumerate(hk.ACTIONS):
+            r, c = i % per, (i // per) * 3
+            self.binding_labels[action].grid(row=r, column=c, sticky="w", padx=(px(self.body, 12) if c else 0, pad))
+            self.binding_entries[action].grid(row=r, column=c + 1, sticky="ew", pady=1)
+            self.detect_buttons[action].grid(row=r, column=c + 2, sticky="w", padx=(px(self.body, 2), 0))
+        for c in range(6):
+            self.keys_rows.columnconfigure(c, weight=1 if c in (1, 4) and c < 3 * groups else 0)
+
+    @staticmethod
+    def _display(text: str) -> str:
+        return hk.display_hotkey(text) if text else ""
+
+    def _refresh_buttons(self) -> None:
+        """Button texts follow the current bindings and step level (the area shows its percentage)."""
+        for action, b in self.intent_buttons.items():
+            b.configure(text=f"{self._action_text(action)}\n{self._hint(action)}")
+        for action, lbl in getattr(self, "binding_labels", {}).items():
+            lbl.configure(text=self._action_text(action))
 
     def toggle_bindings(self) -> None:
-        """Show or hide the hotkey editor."""
-        if self.keys_frame.winfo_ismapped():
+        """Show or hide the hotkey editor (the "Shortcuts" button). The window scrolls; it never resizes itself."""
+        if self.keys_open:
+            self.stop_detect()
+            self.keys_open = False
             self.keys_frame.pack_forget()
+            self.keys_toggle.configure(text=self.t("companion.hotkeys.button"))
+            return
+        self.keys_open = True
+        self.keys_frame.pack(fill="x", after=self.panel, pady=(0, px(self.body, 8)))
+        self.keys_toggle.configure(text=self.t("companion.hotkeys.close"))
+
+    # -------------------------------------------------------------- hotkeys
+    def _keys_say(self, key: str, **params: Any) -> None:
+        self.keys_status.configure(text=self.t(key, **params) if key else "")
+
+    def toggle_detect(self, action: str) -> None:
+        if self._detecting == action:
+            self.stop_detect()
+            self._keys_say("")
         else:
-            self.keys_frame.pack(fill="x", pady=(4, 0))
+            self.start_detect(action)
+
+    def start_detect(self, action: str) -> None:
+        """Read the next key combination pressed in THIS window (Tk bindings) for ``action``.
+
+        The global hotkeys are paused meanwhile, because a combination registered by this program is
+        delivered as a hotkey and would never reach the window.
+        """
+        if not self.keys_open:
+            self.toggle_bindings()
+        if self._detecting is None:
+            self.hotkeys.stop()
+            self.root.bind("<KeyPress>", self.feed_key)
+        self._detecting = action
+        try:
+            self.keys_frame.focus_set()        # so typing does not go into an entry and Space/Enter press nothing
+        except tk.TclError:
+            pass
+        self._keys_say("companion.hotkeys.listening", action=self._action_text(action))
+        self._refresh_detect_buttons()
+
+    def stop_detect(self, restart: bool = True) -> None:
+        if self._detecting is None:
+            return
+        self._detecting = None
+        try:
+            self.root.unbind("<KeyPress>")
+        except tk.TclError:
+            pass
+        if restart:
+            self._start_hotkeys()
+        self._refresh_detect_buttons()
+
+    def _start_hotkeys(self) -> None:
+        if self._hotkeys_enabled and self.hotkeys.available and not self._closed:
+            self.hotkeys.start()
+
+    def _refresh_detect_buttons(self) -> None:
+        for action, b in self.detect_buttons.items():
+            b.configure(text=self.t("companion.hotkeys.cancel" if action == self._detecting
+                                    else "companion.hotkeys.detect"))
+
+    def feed_key(self, event: Any) -> str | None:
+        """One Tk key press while detecting: a free combination is taken and applied at once."""
+        action = self._detecting
+        if action is None:
+            return None
+        combo, status = hk.combo_from_tk_event(event)
+        if status == "escape":
+            self.stop_detect()
+            self._keys_say("")
+        elif status == "no_modifier":
+            self._keys_say("companion.hotkeys.need_modifier")
+        elif status == "unknown":
+            self._keys_say("companion.hotkeys.unknown_key")
+        elif status == "ok" and combo:
+            wanted = {a: v.get().strip() for a, v in self.binding_vars.items()}
+            other = hk.conflict_with(wanted, action, combo)
+            if other is not None:
+                self._keys_say("companion.hotkeys.taken", combo=hk.display_hotkey(combo),
+                               other=self._action_text(other))
+                return "break"
+            self.binding_vars[action].set(hk.display_hotkey(combo))
+            self.stop_detect(restart=False)
+            if self.apply_bindings():
+                self._keys_say("companion.hotkeys.saved", action=self._action_text(action),
+                               combo=hk.display_hotkey(combo))
+        return "break"
+
+    def apply_bindings(self) -> bool:
+        """Use the combinations in the editor; nothing changes while one is invalid or used twice."""
+        self.stop_detect(restart=False)
+        wanted = {a: v.get().strip() for a, v in self.binding_vars.items()}
+        good, errors = hk.parse_bindings(wanted)
+        if errors:
+            dup = [a for a, e in errors.items() if e.startswith("duplicate")]
+            bad = [a for a in errors if a not in dup]
+            names = ", ".join(self._action_text(a) for a in (bad or dup))
+            self._keys_say("companion.hotkeys.invalid" if bad else "companion.hotkeys.duplicate", actions=names)
+            self._start_hotkeys()
+            return False
+        chosen = {a: good[a].text if a in good else "" for a in hk.ACTIONS}
+        self.hotkeys.set_bindings(chosen)
+        self._start_hotkeys()
+        for action, var in self.binding_vars.items():
+            var.set(self._display(chosen[action]))
+        self._save(lambda cfg: setattr(cfg, "companion_hotkeys", dict(chosen)))
+        self._keys_say("companion.hotkeys.applied")
+        self._refresh_buttons()
+        self._refresh()
+        return True
+
+    def reset_bindings(self) -> None:
+        """Back to the default combinations."""
+        for action, var in self.binding_vars.items():
+            var.set(self._display(hk.DEFAULT_BINDINGS.get(action, "")))
+        if self.apply_bindings():
+            self._keys_say("companion.hotkeys.reset_done")
+
+    def _save(self, change: Callable[[Any], None]) -> None:
+        """Change the assistant's config and save it; a failure never breaks the companion."""
+        if self.config is None:
+            return
+        try:
+            change(self.config)
+            if self._persist is not None:
+                self._persist()
+        except Exception:            # saving is a convenience: the choice still applies to this session
+            pass
 
     # --------------------------------------------------------------- actions
     def do(self, action: str) -> Feedback:
         """Run an action (button or hotkey) and give feedback."""
         fb = self.core.handle(action)
+        if action == "step":
+            self._step_changed()
         self._feedback(fb)
         return fb
+
+    def set_step(self, level: str) -> Feedback:
+        """The step selector: choose normal / fine / very fine."""
+        fb = self.core.set_step_level(level)
+        self._step_changed()
+        self._feedback(fb)
+        return fb
+
+    def _step_changed(self) -> None:
+        level = self.core.step_level
+        self.var_step_level.set(level)
+        self._save(lambda cfg: setattr(cfg, "companion_step", level))
+        self._refresh_buttons()
 
     def _feedback(self, fb: Feedback) -> None:
         self.beeper.play(fb.sound)
         lines = [say(r, self.t) for r in fb.reasons] + [say(s.reason, self.t) for s in fb.suggestions]
         self.var_last.set("\n".join(lines))
+        change = last_change(fb, self.t)
+        if change is not None:
+            self._last_change = change
+        elif fb.action in ("undo", "revert") and fb.ok:
+            self._last_change = self.t("companion.last.undone")
         status = self.core.status()
         if self.overlay is not None:
             self.overlay.show(overlay_lines(fb, status, self.t))
@@ -567,12 +883,6 @@ class CompanionWindow:
     def revert_all(self) -> None:
         self._feedback(self.core.revert_all())
 
-    def apply_bindings(self) -> None:
-        if not self.hotkeys.available:
-            return
-        self.hotkeys.rebind({a: v.get().strip() for a, v in self.binding_vars.items()})
-        self._refresh()
-
     def _policy_changed(self) -> None:
         self.core.set_policy(self.var_policy.get())
 
@@ -583,6 +893,12 @@ class CompanionWindow:
     def _tick(self) -> None:
         if self._closed:
             return
+        if self._job is not None:            # called directly (tests): never leave a second timer behind
+            try:
+                self.root.after_cancel(self._job)
+            except tk.TclError:
+                pass
+            self._job = None
         try:
             while True:
                 self.do(self._actions.get_nowait())
@@ -627,12 +943,22 @@ class CompanionWindow:
         if not self.hotkeys.available:
             keys = self.t("companion.hotkeys.unavailable")
         elif self.hotkeys.conflicts or self.hotkeys.errors:
-            bad = ", ".join(self.t(f"companion.action.{a}") for a in
+            bad = ", ".join(self._action_text(a) for a in
                             list(self.hotkeys.conflicts) + list(self.hotkeys.errors))
             keys = self.t("companion.hotkeys.conflict", actions=bad)
         else:
             keys = self.t("companion.hotkeys.ok")
         self.var_keys.set(keys)
+        level = st.step_level
+        step = step_hint(level, self.t)
+        if self.hotkeys.bindings.get("step"):
+            self.var_step.set(self.t("companion.step.status", step=step, combo=self._hint("step")))
+        else:
+            self.var_step.set(self.t("companion.step.status_nokey", step=step))
+        if self.var_step_level.get() != level:
+            self.var_step_level.set(level)
+        self.var_change.set(self.t("companion.last.change", text=self._last_change) if self._last_change
+                            else self.t("companion.last.none"))
         self.keep_button.configure(state="disabled" if self.dry_run else "normal")
 
     # --------------------------------------------------------------- closing
