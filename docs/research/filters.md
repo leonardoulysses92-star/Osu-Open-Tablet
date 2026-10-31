@@ -1,6 +1,6 @@
 # Filter catalog audit (2026-10-30)
 
-Scope: check `osu_tablet_assistant/knowledge/filters.json` against primary sources (plugin C# source at the tag the OTD Plugin Manager actually installs, READMEs, release notes, the OTD Plugin-Repository, OTD source). Machine-readable proposals: `docs/research/filters_update.draft.json` (30 changes, 7 new entries; the new entries pass `knowledge.filters.parse_catalog`).
+Scope: check `osu_tablet_assistant/knowledge/filters.json` against primary sources (plugin C# source at the tag the OTD Plugin Manager actually installs, READMEs, release notes, the OTD Plugin-Repository, OTD source). The machine-readable list of proposals from this audit (30 changes, 7 new entries; the new entries passed `knowledge.filters.parse_catalog`) was `docs/research/filters_update.draft.json`. It was removed from the tree to keep the project tidy and is still in the history at tag `v0.8.0`; check the catalog itself for what was applied.
 
 Legend: **[src]** = read in C# source. **[prose]** = README, tooltip or release notes only. **[inf]** = my inference. **null** = unknown.
 

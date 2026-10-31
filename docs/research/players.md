@@ -1,6 +1,6 @@
 # Player and community tablet configurations (research draft)
 
-Retrieved 2026-10-30. Companion data: `community_presets.draft.json` (33 entries).
+Retrieved 2026-10-30. The curated result is `osu_tablet_assistant/knowledge/community_presets.json` (31 entries). The raw research list (33 entries, `docs/research/community_presets.draft.json`) was removed from the tree to keep the project tidy; it is still in the history at tag `v0.8.0`.
 This is research input for the engine, not product text. Numbers are copied as published, never rounded.
 
 ## 1. Methodology

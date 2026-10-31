@@ -42,6 +42,8 @@ py -3 -m unittest discover -s tests
 
 [Architecture](docs/ARCHITECTURE.md), [companion (live-tuning) mode](docs/COMPANION.md), [play coach](docs/PLAY_COACH.md), [design notes](docs/DESIGN.md) (all English) and [research notes](docs/research/). The usage guide, community data and filter catalog ([guia](docs/guia.md), [comunidad](docs/comunidad.md), [filtros](docs/filtros.md)) are in Spanish.
 
+Version history: [CHANGELOG.md](CHANGELOG.md) (older versions are Git tags, see `git tag`). Want to help? See [CONTRIBUTING.md](CONTRIBUTING.md) (in Spanish; the short version: stdlib only, run `py -3 -m unittest discover -s tests`, keep es/en texts in sync).
+
 ## License
 
 [MIT](LICENSE)

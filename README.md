@@ -81,6 +81,8 @@ tests/                   unittest
 - [Coach de partidas](docs/PLAY_COACH.md) (en inglés): qué ve, qué infiere y sus límites.
 - [Diseño de la interfaz](docs/DESIGN.md) (en inglés): paleta, formas redondeadas y cómo ajustarlas.
 - [Arquitectura](docs/ARCHITECTURE.md) y [notas de investigación](docs/research/).
+- [Historial de versiones](CHANGELOG.md): qué trae cada versión; las anteriores son etiquetas de Git (`git tag`).
+- [Cómo colaborar](CONTRIBUTING.md): ejecutar, probar, normas del proyecto y cómo se publica una versión.
 
 ## Tests
 
