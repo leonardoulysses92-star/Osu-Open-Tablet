@@ -1,12 +1,17 @@
 """Plain-language findings of a play report: at most four short lines (pure).
 
 Each finding is a ``Reason`` the GUI translates (``play.find.*``); ``zone`` parameters are zone ids
-(``engine.playtypes.ZONES``) that the GUI turns into words. Technical numbers stay in the report.
+(``engine.playtypes.ZONES``), ``place`` parameters are ``hotspots.place_id`` strings ("bottom.center_right.corner"),
+``size`` is small / medium / large and ``towards`` a ``hotspots.direction_id``; the GUI turns them into words.
+A hotspot (small region of the fine grid) replaces the coarser edge finding it falls in. Technical numbers stay
+in the report.
 """
 from __future__ import annotations
 
 from ..models import Reason
-from .playtypes import LATE, NOISY, OK, OVER, SHORT, PlayReport
+from .hotspots import direction_id, place_id
+from .playobserve import zone_contains
+from .playtypes import LATE, NOISY, OK, OVER, SHORT, Hotspot, PlayReport
 
 MAX_FINDINGS = 4
 MIN_SEVERITY = 0.15            # weaker zone findings are not worth the player's attention
@@ -23,12 +28,26 @@ def _size(mm: float) -> str:
     return f"{mm:.0f}" if mm >= 2 else f"{mm:.1f}"
 
 
+def hotspot_reason(spot: Hotspot) -> Reason:
+    """One plain sentence about a hotspot: where (in words), which way, about how many mm, how big the zone is."""
+    params = {"place": place_id(spot.fx, spot.fy), "mm": _size(spot.err_mm), "size": spot.size}
+    if spot.kind == "off":
+        params["towards"] = direction_id(spot.dx_mm, spot.dy_mm)
+    return Reason(f"play.find.spot_{spot.kind}", params)
+
+
 def findings(report: PlayReport, limit: int = MAX_FINDINGS) -> list[Reason]:
     """The most useful things to tell the player, strongest first. Never empty for a trusted report."""
     scored: list[tuple[float, Reason]] = []
     chosen_zones: dict[str, str] = {}
+    radius = report.radius_mm or 3.0
+    for spot in report.hotspots:
+        scored.append((1.05 + min(spot.err_mm / radius, 1.0), hotspot_reason(spot)))
     for edge in sorted(report.edges, key=lambda e: -e.severity):
         if edge.kind == OK or edge.severity < MIN_SEVERITY:
+            continue
+        # the finer hotspot already says it, with a better place
+        if any(spot.kind == edge.kind and zone_contains(edge.zone, spot.fx, spot.fy) for spot in report.hotspots):
             continue
         # a corner adds nothing when one of its sides already says the same
         parts = _CORNERS.get(edge.zone, ())

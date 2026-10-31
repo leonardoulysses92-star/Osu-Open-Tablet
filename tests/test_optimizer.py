@@ -1,16 +1,17 @@
 """engine.optimizer: cost, stop rule, one-change proposals and closed-loop convergence on a simulated player."""
 from __future__ import annotations
 
+import math
 import statistics
 import unittest
 from dataclasses import replace
 
 from osu_tablet_assistant.engine import areafit, optimizer as opt, recommend
 from osu_tablet_assistant.engine import playobserve as po
-from osu_tablet_assistant.engine.playtypes import (IMPROVING, INSUFFICIENT, PLATEAU, START, WORSE, FeelFit,
+from osu_tablet_assistant.engine.playtypes import (IMPROVING, INSUFFICIENT, PLATEAU, START, WORSE, FeelFit, Hotspot,
                                                     PlayReport, ReachFit, RoundRecord)
 from osu_tablet_assistant.models import FilterConfig, Priority, ProfileInfo, Rect, UserPreferences
-from playsim import AREA, TABLET, make_map, player_for, simulate
+from playsim import AREA, TABLET, Player, make_map, player_for, simulate
 
 MAP = make_map(seed=11, n=90, gap_ms=320.0)
 IDEAL = Rect(64.0, 37.0, 78.0, 49.0, 180.0)      # the area this simulated hand "wants"
@@ -193,6 +194,58 @@ class ProposalTests(unittest.TestCase):
             state, flat2 = opt.record_round(state, flat, AREA, ())
         proposal = opt.propose(state, profile(), flat2, TABLET)
         self.assertEqual((proposal.kind, proposal.verdict), ("none", PLATEAU))
+
+
+def spot(dx: float, dy: float, share: float, n: int = 40, fx: float = 0.9, fy: float = 0.9) -> Hotspot:
+    return Hotspot("short", 4, 6, 5, 7, 0.8, 0.8, fx, fy, 6.0, 6.0, n, dx, dy, math.hypot(dx, dy), 9.0, share,
+                   0.25, 0.33)
+
+
+class LocalProblemTests(unittest.TestCase):
+    """A problem in one small zone must not move the whole area much (fine-grid hotspots)."""
+
+    def propose(self, *spots: Hotspot):
+        report = fake_report(hotspots=spots)
+        state, report = opt.record_round(opt.new_state(), report, AREA, ())
+        return opt.propose(state, profile(), report, TABLET)
+
+    def test_one_small_patch_suggests_practice_not_a_change(self) -> None:
+        proposal = self.propose(spot(-1.5, -1.5, share=0.05))
+        self.assertEqual((proposal.kind, proposal.verdict), ("none", PLATEAU))
+        self.assertEqual(proposal.message.key, "play.msg.practice_zone")
+        self.assertEqual(proposal.message.params["place"], "bottom.right.corner")
+        self.assertIsNone(proposal.changes)
+
+    def test_a_large_region_moves_the_area_in_proportion_to_its_share(self) -> None:
+        proposal = self.propose(spot(-2.0, 0.0, share=0.4, n=60))
+        self.assertEqual(proposal.kind, "shift")
+        self.assertEqual(proposal.message.key, "play.msg.shift_local")
+        self.assertAlmostEqual(proposal.move[0], -0.8, delta=0.15)       # 2 mm x 40 % of the play
+        self.assertLessEqual(math.hypot(*proposal.move), opt.LOCAL_MAX_SHIFT_MM + 1e-6)
+        self.assertIn("play.prop.local", [r.key for r in proposal.reasons])
+        self.assertTrue(areafit.area_fits(proposal.area, TABLET))
+
+    def test_opposite_regions_cancel_and_few_objects_never_move_anything(self) -> None:
+        self.assertEqual(self.propose(spot(-2.0, 0.0, 0.4, fx=0.9), spot(2.0, 0.0, 0.4, fx=0.1)).kind, "none")
+        self.assertEqual(self.propose(spot(-3.0, 0.0, 0.5, n=10)).kind, "none")
+
+    def test_global_problems_still_come_first(self) -> None:
+        shifted = fake_report(hotspots=(spot(-2.0, 0.0, 0.4, n=60),),
+                              reach=ReachFit(1.0, 1.0, 2.0, 0.0, (0.99, 1.01), (0.99, 1.01), 60))
+        state, shifted = opt.record_round(opt.new_state(), shifted, AREA, ())
+        proposal = opt.propose(state, profile(), shifted, TABLET)
+        self.assertEqual((proposal.kind, proposal.message.key), ("shift", "play.msg.shift"))
+
+    def test_a_simulated_corner_patch_does_not_move_the_area(self) -> None:
+        beatmap = make_map(seed=201, n=300, gap_ms=300)
+        player = Player(miss_rate=0.02, aim_noise_mm=0.4, hz=250, patch=(0.85, 0.85, 1.0, 1.0), patch_short_mm=2.0)
+        report = po.analyze_play(beatmap, simulate(beatmap, player, seed=1, area=AREA))
+        self.assertTrue(report.hotspots)
+        state, report = opt.record_round(opt.new_state(), report, AREA, ())
+        proposal = opt.propose(state, profile(), report, TABLET, allow_filters=False)
+        self.assertNotEqual(proposal.kind, "scale")
+        self.assertLess(proposal.move_mm, opt.MIN_SHIFT_MM + 1e-9)
+        self.assertEqual(proposal.message.key, "play.msg.practice_zone")
 
 
 class ClosedLoopTests(unittest.TestCase):

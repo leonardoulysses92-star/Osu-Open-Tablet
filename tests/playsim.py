@@ -32,6 +32,8 @@ class Player:
     scale: float = 1.0              # 1.5 = DT, 0.75 = HT
     hr: bool = False                # the player sees the map flipped vertically
     hz: float = 1000.0
+    patch: tuple[float, float, float, float] | None = None   # (fx0, fy0, fx1, fy1) playfield region ...
+    patch_short_mm: float = 0.0     # ... where the cursor stops this many mm short (towards the centre)
 
 
 def player_for(area: Rect, ideal: Rect, **kw) -> Player:
@@ -76,6 +78,15 @@ def simulate(beatmap: Beatmap, player: Player, seed: int = 0, t0: float | None =
         ay = cy + player.gain_y * (oy - cy) + player.bias_y_mm / mm_y
         ax += rng.gauss(0, player.aim_noise_mm / mm_x)
         ay += rng.gauss(0, player.aim_noise_mm / mm_y)
+        if player.patch is not None:
+            fx, fy = o.x / 512.0, (384.0 - o.y if player.hr else o.y) / 384.0
+            x0, y0, x1, y1 = player.patch
+            if x0 <= fx <= x1 and y0 <= fy <= y1:
+                pcx, pcy = playfield_to_desktop(256.0, 192.0, display)
+                dx_mm, dy_mm = (pcx - ox) * mm_x, (pcy - oy) * mm_y
+                length = max((dx_mm ** 2 + dy_mm ** 2) ** 0.5, 1e-6)
+                ax += dx_mm / length * player.patch_short_mm / mm_x
+                ay += dy_mm / length * player.patch_short_mm / mm_y
         when.append(t0 + o.time_ms / 1000.0 / player.scale)
         aims.append((ax, ay))
         if rng.random() >= player.miss_rate:

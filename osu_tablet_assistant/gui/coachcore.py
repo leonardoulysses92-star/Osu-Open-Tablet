@@ -6,6 +6,7 @@ recorder, the osu! window title, the process list) is injected, so it is tested 
 """
 from __future__ import annotations
 
+import math
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -14,17 +15,20 @@ from typing import Callable, Mapping, Sequence
 from ..engine import adapt, findings as findings_mod, optimizer as opt, replay as replay_mod
 from ..engine.beatmap import BeatmapIndex, find_beatmap, load_beatmap, parse_window_title
 from ..engine.playobserve import ALIGN_TRUST, analyze_play
-from ..engine.playtypes import Beatmap, Convergence, PlayCapture, PlayReport
+from ..engine.playtypes import DEFAULT_DETAIL, Beatmap, Convergence, PlayCapture, PlayReport, grid_for
+from ..keys import DEFAULT_CLICK_KEYS, PEN_TIP_KEY, display_list, normalize_keys
 from ..knowledge.filters import FilterSpec, load_catalog
 from ..models import DisplaySpec, Reason, Rect, TabletSpec, UserPreferences
 from ..otd.livetune import LiveTuner, OsuWatcher
 from .i18n import t as default_t
 from .pen_sampler import PenSampler
-from .playwatch import DEFAULT_CLICK_KEYS, LiveView, PlayRecorder, osu_window_title, songs_dir_for, windows_key_source
+from .playwatch import LiveView, PlayRecorder, osu_window_title, songs_dir_for, windows_key_source
 
 ANALYSIS_EVERY_S = 1.5
 AUTO_STOP_IDLE_S = 8.0
 AUTO_STOP_MIN_CLICKS = 20
+NO_CLICKS_HINT_S = 6.0          # recording this long, cursor moving, no click from the chosen keys: ask about them
+NO_CLICKS_TRAVEL_SCREENS = 2.0  # ... "moving" = the cursor travelled this many screen heights
 PHASES = ("prepare", "observe", "report")
 Translate = Callable[..., str]
 # Everything the coach and its helpers collect, nothing more (each id has a ``play.data.<id>`` text).
@@ -33,14 +37,31 @@ DATA_LEDGER = ("cursor", "keys", "window", "map", "replay", "profile", "never")
 
 def ledger_text(translate: Translate = default_t, keys: Sequence[str] = DEFAULT_CLICK_KEYS) -> str:
     """The plain-language list of what is collected, why, and where it stays (shown in the app)."""
-    return "\n".join("• " + translate(f"play.data.{item}", keys=", ".join(keys)) for item in DATA_LEDGER)
+    return "\n".join("• " + translate(f"play.data.{item}", keys=display_list(keys)) for item in DATA_LEDGER)
+
+
+def place_text(place: str, translate: Translate = default_t) -> str:
+    """Words for a ``hotspots.place_id`` ("bottom.center_right.corner" -> "Abajo, a la derecha del centro, ...")."""
+    parts = place.split(".")
+    if len(parts) < 2:
+        return place
+    text = translate("play.place.at", v=translate(f"play.place.v.{parts[0]}"), h=translate(f"play.place.h.{parts[1]}"))
+    if len(parts) > 2 and parts[2]:
+        text += " " + translate(f"play.place.near.{parts[2]}")
+    return text
 
 
 def say(reason: Reason, translate: Translate = default_t) -> str:
-    """Translate a Reason; zone and direction parameters become words, adapt's axis/strength too."""
+    """Translate a Reason; zone, place, size and direction parameters become words, adapt's axis/strength too."""
     params = dict(reason.params)
     if "zone" in params:
         params["zone"] = translate(f"play.zone.{params['zone']}")
+    if "place" in params:
+        params["place"] = place_text(str(params["place"]), translate)
+    if "size" in params:
+        params["size"] = translate(f"play.size.{params['size']}")
+    if "towards" in params:
+        params["towards"] = translate(f"play.towards.{params['towards']}")
     if "dir" in params:
         params["dir"] = translate(f"play.dir.{params['dir']}")
     if reason.key.startswith("adapt.") and "axis" in params:
@@ -48,6 +69,18 @@ def say(reason: Reason, translate: Translate = default_t) -> str:
     if "strength" in params:
         params["strength"] = translate(f"passive.strength.{params['strength']}")
     return translate(reason.key, **params)
+
+
+def _travel(capture: PlayCapture) -> float:
+    """How far the cursor moved during a capture, in desktop pixels."""
+    total, prev = 0.0, None
+    for s in capture.samples:
+        if prev is not None:
+            step = math.hypot(s.x - prev.x, s.y - prev.y)
+            if math.isfinite(step):
+                total += step
+        prev = s
+    return total
 
 
 # --------------------------------------------------------------------------
@@ -62,10 +95,11 @@ class Readiness:
     beatmap: Beatmap | None = None
     keys_readable: bool = True
     issues: tuple[Reason, ...] = ()
+    keys: tuple[str, ...] = DEFAULT_CLICK_KEYS   # the click keys that will be read
 
     @property
     def can_start(self) -> bool:
-        return self.beatmap is not None and self.keys_readable
+        return self.beatmap is not None and self.keys_readable and bool(self.keys)
 
 
 @dataclass(frozen=True)
@@ -78,6 +112,7 @@ class RoundResult:
     marks: tuple[str, ...]
     check: replay_mod.InferenceCheck | None = None    # live inference vs the game's own replay, when one was given
     from_replay: bool = False
+    hint: Reason | None = None              # e.g. "no click seen with Z, X: other buttons?" (offer the key card)
 
 
 @dataclass(frozen=True)
@@ -117,10 +152,11 @@ class CoachCore:
                  cache_path: Path | None = None, prefs: UserPreferences | None = None,
                  policy: adapt.TuningPolicy | None = None, catalog: Mapping[str, FilterSpec] | None = None,
                  aspect_lock: bool = True, allow_filters: bool = True, keys: Sequence[str] = DEFAULT_CLICK_KEYS,
-                 analyze: Callable[..., PlayReport] = analyze_play,
+                 analysis_detail: str = DEFAULT_DETAIL, analyze: Callable[..., PlayReport] = analyze_play,
                  clock: Callable[[], float] = time.monotonic) -> None:
         self.tuner, self.tablet, self.display = tuner, tablet, display
-        self.keys = tuple(keys)
+        self.keys: tuple[str, ...] = normalize_keys(keys, default=())
+        self.analysis_detail = analysis_detail
         self.watcher = watcher if watcher is not None else OsuWatcher()
         self._title_source, self._analyze, self._clock = title_source, analyze, clock
         self.cache_path = cache_path
@@ -146,6 +182,39 @@ class CoachCore:
     # --------------------------------------------------------------- prepare
     def _default_recorder(self, area: Rect) -> PlayRecorder:
         return PlayRecorder(PenSampler(poll_hz=1500.0), self.display, area, self.keys, tablet=self.tablet)
+
+    def set_keys(self, keys: Sequence[str]) -> bool:
+        """Use these click keys from the next round on (the recorder is rebuilt with them). False while observing."""
+        if self.phase == "observe":
+            return False
+        self.keys = normalize_keys(keys, default=())
+        if self.recorder is not None and not getattr(self.recorder, "running", False):
+            self.recorder = None              # the next start() builds one that reads exactly these keys
+        return True
+
+    def set_analysis_detail(self, detail: str) -> None:
+        """``normal`` (3x4) | ``fine`` (6x8) | ``very_fine`` (9x12): grid of the next reports."""
+        self.analysis_detail = detail
+
+    @property
+    def grid(self) -> tuple[int, int]:
+        return grid_for(self.analysis_detail)
+
+    def _full_analysis(self, capture: PlayCapture) -> PlayReport:
+        rows, cols = self.grid
+        return self._analyze(self.beatmap, capture, rows=rows, cols=cols)
+
+    def no_clicks_hint(self, view: LiveView | None = None) -> Reason | None:
+        """Plain hint when the cursor moves a lot but none of the chosen keys was pressed (other buttons?)."""
+        view = view if view is not None else self.live_view()
+        if view is None or view.clicks > 0 or view.elapsed_s < NO_CLICKS_HINT_S:
+            return None
+        if view.travel_px < NO_CLICKS_TRAVEL_SCREENS * max(self.display.height_px, 1):
+            return None
+        return self._keys_hint()
+
+    def _keys_hint(self) -> Reason:
+        return Reason("play.keys.none_seen", {"keys": display_list(self.keys)})
 
     @property
     def profile(self):   # ProfileInfo of what is live right now
@@ -177,12 +246,19 @@ class CoachCore:
         elif osu is not None and self.beatmap is None:
             issues.append(Reason("play.prep.map_not_found"))
         keys_ok = self.recorder.keys_available if self.recorder is not None else self._keys_readable()
-        if not keys_ok:
+        if not self.keys:
+            issues.append(Reason("play.prep.no_keys"))
+        elif not keys_ok:
             issues.append(Reason("play.prep.keys_unreadable"))
-        return Readiness(osu is not None, osu.flavor if osu else None, title, self.beatmap, keys_ok, tuple(issues))
+        if PEN_TIP_KEY in self.keys:     # cannot be checked from here: explain what has to be true
+            issues.append(Reason("play.prep.pen_tip"))
+        return Readiness(osu is not None, osu.flavor if osu else None, title, self.beatmap, keys_ok, tuple(issues),
+                         self.keys)
 
     def _keys_readable(self) -> bool:
-        return windows_key_source(self.keys) is not None or self._recorder_factory is not self._default_recorder
+        if self._recorder_factory is not self._default_recorder:
+            return True
+        return bool(self.keys) and windows_key_source(self.keys) is not None
 
     def _find_map(self, title: str | None, exe: str | None) -> None:
         info = parse_window_title(title)
@@ -208,7 +284,7 @@ class CoachCore:
     # --------------------------------------------------------------- observe
     def start(self) -> bool:
         """Begin recording. False when there is no map yet."""
-        if self.beatmap is None:
+        if self.beatmap is None or not self.keys:
             return False
         self.recorder = self._recorder_factory(self.area)
         self.recorder.start()
@@ -242,11 +318,23 @@ class CoachCore:
         if self.recorder is None or self.beatmap is None:
             return None
         self.recorder.stop()
-        return self._complete_round(self.recorder.snapshot())
+        capture = self.recorder.snapshot()
+        hint = None
+        if len(capture.clicks) < 3 and _travel(capture) >= NO_CLICKS_TRAVEL_SCREENS * max(self.display.height_px, 1):
+            hint = self._keys_hint()
+        return self._complete_round(capture, hint=hint)
 
-    def _complete_round(self, capture: PlayCapture, from_replay: bool = False) -> RoundResult:
+    def abort(self) -> None:
+        """Stop observing without making a round of it (e.g. to change the click keys)."""
+        if self.recorder is not None:
+            self.recorder.stop()
+        self.recorder, self.live_report = None, None
+        self.phase = "prepare"
+
+    def _complete_round(self, capture: PlayCapture, from_replay: bool = False, hint: Reason | None = None
+                        ) -> RoundResult:
         assert self.beatmap is not None
-        report = self._analyze(self.beatmap, capture)
+        report = self._full_analysis(capture)
         pending, self._pending = self._pending, None
         profile = self.profile
         self.state, report = opt.record_round(
@@ -262,7 +350,7 @@ class CoachCore:
                                       convergence.rounds, convergence.last_gain)
         self.result = RoundResult(report, tuple(findings_mod.findings(report)) if report.trusted else
                                   (Reason("play.find.untrusted"),), proposal, convergence, self.marks(),
-                                  from_replay=from_replay)
+                                  from_replay=from_replay, hint=hint)
         self.phase = "report"
         return self.result
 
@@ -281,7 +369,7 @@ class CoachCore:
         if replay is None:
             return ReplayOutcome(False, Reason("play.replay.unreadable"))
         capture = replay_mod.replay_to_capture(replay, self.area, self.display, self.tablet)
-        return replay, self._analyze(self.beatmap, capture), replay_mod.matches_beatmap(replay, self.beatmap)
+        return replay, self._full_analysis(capture), replay_mod.matches_beatmap(replay, self.beatmap)
 
     def round_from_replay(self, path: str | Path) -> ReplayOutcome:
         """Use the game's own replay as the round (exact cursor and keys; works without reading any key)."""
@@ -307,7 +395,7 @@ class CoachCore:
         if check is None:
             return ReplayOutcome(False, Reason("play.replay.no_overlap"), replay, same)
         self.result = RoundResult(self.result.report, self.result.findings, self.result.proposal,
-                                  self.result.convergence, self.result.marks, check, False)
+                                  self.result.convergence, self.result.marks, check, False, self.result.hint)
         return ReplayOutcome(True, None if same is not False else Reason("play.replay.other_map"), replay, same, check)
 
     def marks(self) -> tuple[str, ...]:

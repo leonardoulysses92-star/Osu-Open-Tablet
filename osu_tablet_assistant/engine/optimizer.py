@@ -7,7 +7,12 @@ One round = the player plays a map, ``playobserve`` produces a ``PlayReport``,
 1. **shift** the area by the average cursor offset (the "bias" of the reach fit);
 2. **size**: scale the area by the per-axis gain (with the aspect locked, the mean of both
    gains is used and a reason says so);
-3. **filters**, only through ``adapt.step`` so the plugin policy and the safety limits of the
+3. **local**: when the whole-play pattern needs nothing but the fine grid found problem regions
+   (``report.hotspots``), a shift weighted by the share of objects in them (at most
+   ``LOCAL_MAX_SHIFT_MM``, needs ``LOCAL_MIN_N`` objects). One small corner patch therefore moves the area
+   little or not at all; when nothing is worth changing the proposal is "none" with "play more of that
+   zone" and where it is;
+4. **filters**, only through ``adapt.step`` so the plugin policy and the safety limits of the
    companion mode apply: lag on fast jumps -> "more responsive", jitter on slow parts -> "steadier
    at rest", both -> nothing (ambiguous).
 
@@ -36,6 +41,8 @@ from typing import Any, Mapping, Sequence
 from ..knowledge.filters import FilterSpec, load_catalog
 from ..models import FilterConfig, Priority, ProfileChanges, ProfileInfo, Reason, Rect, TabletSpec, UserPreferences
 from . import adapt, areafit
+from .findings import hotspot_reason
+from .hotspots import place_id
 from .playobserve import MIN_MATCHED, MIN_REACH_POINTS
 from .playtypes import (HIT, IMPROVING, INSUFFICIENT, PLATEAU, START, WORSE, Convergence, PlayReport, RoundRecord)
 
@@ -64,6 +71,8 @@ LAG_MM, LAG_RADIUS_FRACTION = 0.8, 0.25
 JITTER_MM = 0.06
 MIN_FAST, MIN_SLOW = 4, 5
 UNDO_MEMORY = 6
+LOCAL_MIN_N = 20               # objects inside the hotspots before they may move the area at all
+LOCAL_MAX_SHIFT_MM = 1.5       # a shift for local problems is never larger than this
 
 
 # ------------------------------------------------------------------- cost
@@ -305,6 +314,48 @@ def _shift(state: OptimizerState, profile: ProfileInfo, report: PlayReport, tabl
                          move=(mx, my))
 
 
+def _local(state: OptimizerState, profile: ProfileInfo, report: PlayReport, tablet: TabletSpec | None
+           ) -> RoundProposal | None:
+    """A shift for local problem regions (hotspots), weighted by how much of the play they cover.
+
+    Each hotspot's error counts in proportion to its share of the clicked objects, so one small corner patch
+    moves the area only a little (and usually not at all: below the minimum step). Opposite hotspots cancel.
+    Without enough objects in them, nothing moves (``propose`` then says "play more of that zone").
+    """
+    spots = report.hotspots
+    if not spots or sum(s.n for s in spots) < LOCAL_MIN_N:
+        return None
+    ex = sum(s.dx_mm * s.share for s in spots)
+    ey = sum(s.dy_mm * s.share for s in spots)
+    length = math.hypot(ex, ey)
+    if length < MIN_SHIFT_MM:
+        return None
+    cap = min(MAX_SHIFT_MM * state.trust, LOCAL_MAX_SHIFT_MM)
+    if length > cap:
+        ex, ey = ex * cap / length, ey * cap / length
+    if _repeats(state, "shift", ex, ey):
+        return None
+    area, reasons = areafit.shift_area(profile.tablet_area, ex, ey, tablet)
+    if area == profile.tablet_area:
+        return None
+    mx, my = areafit.tablet_to_view(area.x - profile.tablet_area.x, area.y - profile.tablet_area.y, area.rotation)
+    if math.hypot(mx, my) < MIN_SHIFT_MM * 0.5:
+        return None
+    lead = Reason("play.prop.shift", {"dx": f"{mx:+.1f}", "dy": f"{my:+.1f}"})
+    why = Reason("play.prop.local", {"place": place_id(spots[0].fx, spots[0].fy)})
+    return RoundProposal("shift", IMPROVING, Reason("play.msg.shift_local"), (lead, why) + tuple(reasons), area=area,
+                         move=(mx, my))
+
+
+def _practice(report: PlayReport) -> RoundProposal | None:
+    """Only a small region is off and nothing is worth changing: say where, and to play that zone more."""
+    if not report.hotspots:
+        return None
+    top = report.hotspots[0]
+    return _none(PLATEAU, Reason("play.msg.practice_zone", {"place": place_id(top.fx, top.fy)}),
+                 (hotspot_reason(top),))
+
+
 def _significant(gain: float, ci: tuple[float, float]) -> bool:
     return (ci[1] < 1.0 or ci[0] > 1.0) and abs(gain - 1.0) >= MIN_SCALE_STEP
 
@@ -381,8 +432,9 @@ def propose(state: OptimizerState, profile: ProfileInfo, report: PlayReport, tab
     catalog = catalog if catalog is not None else load_catalog()
     for make in (lambda: _shift(state, profile, report, tablet),
                  lambda: _scale(state, profile, report, tablet, aspect_lock),
+                 lambda: _local(state, profile, report, tablet),
                  lambda: _filter(state, profile, report, tablet, policy, catalog) if allow_filters else None):
         proposal = make()
         if proposal is not None:
             return replace(proposal, verdict=verdict.verdict if verdict.verdict != START else IMPROVING)
-    return _none(PLATEAU, Reason("play.conv.nothing_left"))
+    return _practice(report) or _none(PLATEAU, Reason("play.conv.nothing_left"))

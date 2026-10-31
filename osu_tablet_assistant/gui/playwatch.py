@@ -3,8 +3,10 @@
 What it reads, and nothing else:
 
 * the OS cursor position (``PenSampler``, ~1.5 kHz);
-* the pressed/released state of the CONFIGURED click keys only (default Z, X, mouse 1, mouse 2),
-  through ``GetAsyncKeyState``. No other key is ever queried; only press times are stored;
+* the pressed/released state of the CONFIGURED click keys only (default Z and X; the player picks them,
+  see ``osu_tablet_assistant.keys``), through ``GetAsyncKeyState``. No other key is ever queried, there is
+  no global keyboard hook, and only press times (with the key's name) are stored. The pen tip (``mouse1``)
+  is polled only when the player said they click with it;
 * the title of osu!'s own window (windows of other programs are not read).
 
 Nothing leaves the PC. osu!'s memory is never read. Every OS-facing source is injectable so the
@@ -12,6 +14,7 @@ logic runs (and is tested) without Windows.
 """
 from __future__ import annotations
 
+import math
 import os
 import threading
 import time
@@ -20,30 +23,17 @@ from pathlib import Path
 from typing import Callable, Collection, Mapping, Sequence
 
 from ..engine.playtypes import ClickEvent, PlayCapture
+from ..keys import DEFAULT_CLICK_KEYS, key_code
 from ..models import DisplaySpec, PenSample, Rect, TabletSpec
 from ..otd.livetune import find_osu, list_processes
 from .pen_sampler import PenSampler
 
-DEFAULT_CLICK_KEYS = ("z", "x", "mouse1", "mouse2")
 DEFAULT_POLL_HZ = 500.0
 TRAIL_S = 0.6
 
-_MOUSE_CODES = {"mouse1": 0x01, "mouse2": 0x02, "mouse3": 0x04, "mouse4": 0x05, "mouse5": 0x06}
-_NAMED_CODES = {"space": 0x20, "shift": 0x10, "ctrl": 0x11, "alt": 0x12, "enter": 0x0D}
-
 KeySource = Callable[[], Mapping[str, bool]]
-
-
-def key_code(name: str) -> int | None:
-    """Windows virtual-key code of a configured key name ("z", "5", "mouse1", "space"...), or None."""
-    text = name.strip().lower()
-    if text in _MOUSE_CODES:
-        return _MOUSE_CODES[text]
-    if text in _NAMED_CODES:
-        return _NAMED_CODES[text]
-    if len(text) == 1 and (text.isalpha() or text.isdigit()):
-        return ord(text.upper())
-    return None
+__all__ = ["DEFAULT_CLICK_KEYS", "KeySource", "LiveView", "PlayRecorder", "key_code", "osu_window_title",
+           "songs_dir_for", "windows_key_source", "windows_window_lister"]
 
 
 def windows_key_source(keys: Sequence[str]) -> KeySource | None:
@@ -167,6 +157,8 @@ class LiveView:
     clicks: int
     last_click_t: float | None
     now: float
+    travel_px: float = 0.0          # how far the cursor moved since the start (to notice "moving but no clicks")
+    elapsed_s: float = 0.0          # seconds since the recording started
 
     @property
     def idle_s(self) -> float | None:
@@ -196,6 +188,7 @@ class PlayRecorder:
         self._samples: list[PenSample] = []
         self._clicks: list[ClickEvent] = []
         self._down: dict[str, bool] = {k: False for k in self.keys}
+        self._travel = 0.0
         self._thread: threading.Thread | None = None
         self._stop = threading.Event()
         self.started_at = 0.0
@@ -211,7 +204,7 @@ class PlayRecorder:
         """Begin recording (clears any previous run)."""
         self.stop()
         with self._lock:
-            self._samples, self._clicks = [], []
+            self._samples, self._clicks, self._travel = [], [], 0.0
             self._down = {k: False for k in self.keys}
         self.sampler.drain()
         self.started_at, self.ended_at, self.running = self._clock(), None, True
@@ -262,6 +255,14 @@ class PlayRecorder:
         fresh = self.sampler.drain()
         if fresh:
             with self._lock:
+                prev = self._samples[-1] if self._samples else fresh[0]
+                travel = 0.0
+                for s in fresh:
+                    step = math.hypot(s.x - prev.x, s.y - prev.y)
+                    if math.isfinite(step):
+                        travel += step
+                    prev = s
+                self._travel += travel
                 self._samples.extend(fresh)
 
     def snapshot(self) -> PlayCapture:
@@ -281,4 +282,5 @@ class PlayRecorder:
             position = (self._samples[-1].x, self._samples[-1].y) if self._samples else None
             last = self._clicks[-1].t if self._clicks else None
             count = len(self._clicks)
-        return LiveView(position, trail, count, last, now)
+            travel = self._travel
+        return LiveView(position, trail, count, last, now, travel, max(0.0, now - self.started_at))

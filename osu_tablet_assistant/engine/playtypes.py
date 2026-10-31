@@ -20,8 +20,16 @@ from dataclasses import dataclass, field
 
 from ..models import DisplaySpec, PenSample, Reason, Rect, TabletSpec
 
-GRID_ROWS = 3
-GRID_COLS = 4
+# Analysis grid over the PLAYFIELD (rows x columns of the 512x384 field). Finer grids get smaller cells; the
+# cells are pooled with their neighbours (``engine.hotspots``), so few objects per cell is not noise.
+ANALYSIS_DETAILS = {"normal": (3, 4), "fine": (6, 8), "very_fine": (9, 12)}
+DEFAULT_DETAIL = "fine"
+GRID_ROWS, GRID_COLS = ANALYSIS_DETAILS[DEFAULT_DETAIL]
+
+
+def grid_for(detail: str | None) -> tuple[int, int]:
+    """Rows and columns of an analysis detail level (unknown -> the default)."""
+    return ANALYSIS_DETAILS.get(detail or DEFAULT_DETAIL, ANALYSIS_DETAILS[DEFAULT_DETAIL])
 
 # Verdicts of one judged object
 HIT = "hit"
@@ -145,10 +153,49 @@ class CellStat:
     err_y_mm: float = 0.0
     err_mm: float = 0.0                  # mean distance
     along_mm: float = 0.0
+    # pooled with the neighbouring cells (empirical Bayes); what the map and the hotspots use
+    est_x_mm: float = 0.0                # estimated signed error, player's view
+    est_y_mm: float = 0.0
+    est_miss: float = 0.0                # estimated miss rate
+    enough: bool = False                 # False: too few objects here to say anything ("no data")
 
     @property
     def miss_rate(self) -> float:
         return self.misses / self.n if self.n else 0.0
+
+
+@dataclass(frozen=True)
+class Hotspot:
+    """A small region where the aim is off beyond what the whole-play pattern (reach fit) explains.
+
+    Adjacent cells that are each weak but jointly significant are merged. ``u, v`` is the centroid in
+    normalized area coordinates, ``fx, fy`` in the playfield; the size is the region's extent on the tablet.
+    """
+    kind: str                            # short | over | off
+    row0: int
+    col0: int
+    row1: int                            # inclusive
+    col1: int
+    u: float
+    v: float
+    fx: float
+    fy: float
+    width_mm: float
+    height_mm: float
+    n: int                               # objects clicked inside
+    dx_mm: float                         # mean error beyond the whole-play pattern, player's view
+    dy_mm: float
+    err_mm: float                        # size of that error
+    z: float                             # evidence (error / its standard error)
+    share: float                         # n / all clicked objects
+    width_frac: float = 0.0              # extent as a fraction of the playfield
+    height_frac: float = 0.0
+
+    @property
+    def size(self) -> str:
+        """``small`` | ``medium`` | ``large`` (fraction of the playfield it spans)."""
+        return "small" if self.width_frac <= 0.3 and self.height_frac <= 0.3 else \
+            "medium" if self.width_frac <= 0.55 and self.height_frac <= 0.55 else "large"
 
 
 @dataclass(frozen=True)
@@ -202,6 +249,8 @@ class PlayReport:
     partial: bool = False
     cost: float | None = None            # filled by optimizer.record_round
     cost_ci: tuple[float, float] | None = None
+    hotspots: tuple[Hotspot, ...] = ()   # strongest first
+    grid: tuple[int, int] = (GRID_ROWS, GRID_COLS)
 
     @property
     def trusted(self) -> bool:

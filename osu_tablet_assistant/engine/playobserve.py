@@ -25,10 +25,11 @@ import statistics
 from typing import Sequence
 
 from ..models import PenSample, Reason
-from . import areafit
+from . import areafit, hotspots
 from .beatmap import circle_radius_osu_px, hit_window_ms, playfield_scale, playfield_to_desktop
-from .playtypes import (HIT, LATE, NOISY, NO_CLICK, OK, OVER, SHORT, TOO_EARLY, TOO_FAR, TOO_LATE, Alignment,
-                        Beatmap, CellStat, EdgeFinding, FeelFit, ObjectResult, PlayCapture, PlayReport, ReachFit)
+from .playtypes import (GRID_COLS, GRID_ROWS, HIT, LATE, NOISY, NO_CLICK, OK, OVER, SHORT, TOO_EARLY, TOO_FAR,
+                        TOO_LATE, Alignment, Beatmap, EdgeFinding, FeelFit, ObjectResult, PlayCapture,
+                        PlayReport, ReachFit)
 
 # ----------------------------------------------------------------- constants
 ALIGN_TRUST = 0.6              # below this quality the report should not be trusted
@@ -280,6 +281,12 @@ class _Geometry:
     def uv(self, px: float, py: float) -> tuple[float, float]:
         return (px - self.left) / self.display.width_px, (py - self.top) / self.display.height_px
 
+    def playfield_uv(self) -> tuple[float, float, float, float]:
+        """The playfield's extent in normalized area coordinates ``(u_left, v_top, u_right, v_bottom)``."""
+        u0, v0 = self.uv(*playfield_to_desktop(0.0, 0.0, self.display))
+        u1, v1 = self.uv(*playfield_to_desktop(512.0, 384.0, self.display))
+        return u0, v0, u1, v1
+
 
 def _choose_flip(beatmap: Beatmap, track: _Track, geo: _Geometry, clicks: Sequence[float],
                  pairs: list[tuple[int, int, float]]) -> bool:
@@ -367,25 +374,10 @@ def _judge(beatmap: Beatmap, capture: PlayCapture, track: _Track, geo: _Geometry
     return out, jumps
 
 
-def _cells(results: Sequence[ObjectResult], rows: int, cols: int) -> tuple[CellStat, ...]:
-    acc: dict[tuple[int, int], list[ObjectResult]] = {}
-    for r in results:
-        key = (min(int(r.fy * rows), rows - 1), min(int(r.fx * cols), cols - 1))
-        acc.setdefault(key, []).append(r)
-    cells = []
-    for row in range(rows):
-        for col in range(cols):
-            items = acc.get((row, col), [])
-            clicked = [r for r in items if r.err_mm is not None]
-            along = [r.along_mm for r in clicked if r.along_mm is not None]
-            n = len(clicked)
-            cells.append(CellStat(
-                row, col, len(items), sum(1 for r in items if r.verdict in (NO_CLICK, TOO_FAR)),
-                sum(r.err_x_mm for r in clicked) / n if n else 0.0,
-                sum(r.err_y_mm for r in clicked) / n if n else 0.0,
-                sum(r.err_mm for r in clicked) / n if n else 0.0,
-                sum(along) / len(along) if along else 0.0))
-    return tuple(cells)
+def zone_contains(zone: str, fx: float, fy: float) -> bool:
+    """Whether a playfield point (0..1) is inside one of the edge-finding zones (``playtypes.ZONES``)."""
+    test = _ZONE_TESTS.get(zone)
+    return bool(test and test(fx, fy))
 
 
 def _slope(xs: Sequence[float], ys: Sequence[float], idx: Sequence[int], rng: random.Random, pairs: int
@@ -545,12 +537,14 @@ def _detrended_rms(ts: list[float], xs: list[float], ys: list[float]) -> float:
 
 
 # ------------------------------------------------------------------ the report
-def analyze_play(beatmap: Beatmap, capture: PlayCapture, rows: int = 3, cols: int = 4, seed: int = 0,
+def analyze_play(beatmap: Beatmap, capture: PlayCapture, rows: int = GRID_ROWS, cols: int = GRID_COLS, seed: int = 0,
                  detail: bool = True) -> PlayReport:
     """Everything the coach learns from a (possibly partial) play. Deterministic for a given ``seed``; never raises.
 
-    ``detail=False`` is the cheap live view: alignment and per-object results only (no reach fit, zones or
-    feel), about 3x faster, for the picture that updates while the player is still playing.
+    ``rows`` x ``cols`` is the analysis grid over the playfield (``playtypes.ANALYSIS_DETAILS``); its cells are
+    pooled with their neighbours and small problem regions become ``hotspots`` (``engine.hotspots``).
+    ``detail=False`` is the cheap live view: alignment and per-object results only (no reach fit, zones,
+    grid or feel), about 3x faster, for the picture that updates while the player is still playing.
     """
     try:
         return _analyze(beatmap, capture, rows, cols, seed, detail)
@@ -584,12 +578,16 @@ def _analyze(beatmap: Beatmap, capture: PlayCapture, rows: int, cols: int, seed:
     misses = sum(1 for r in results if r.verdict != HIT)
     times = [r.time_error_ms for r in clicked if r.time_error_ms is not None]
     span = (min(c.t for c in capture.clicks) - 0.5, end)
+    reach = _reach(results, capture, seed) if detail else None
+    cells, spots = (), ()
+    if detail:
+        cells, spots = hotspots.analyze_grid(results, rows, cols, reach, areafit.view_size(capture.area),
+                                             geo.playfield_uv(), geo.radius_mm)
     return PlayReport(
         alignment=align, n_objects=len(objs), n_judged=len(results), results=tuple(results),
-        cells=_cells(results, rows, cols) if detail else (), reach=_reach(results, capture, seed) if detail else None,
-        edges=_edges(results, geo.radius_mm) if detail else (),
+        cells=cells, reach=reach, edges=_edges(results, geo.radius_mm) if detail else (),
         feel=_feel(track, geo, jumps, span) if detail else None,
         miss_rate=misses / len(results) if results else 0.0,
         mean_err_ratio=(statistics.fmean(r.err_mm for r in clicked) / geo.radius_mm) if clicked else None,
         time_spread_ms=_mad(times) * 1.4826 if times else None, radius_mm=geo.radius_mm,
-        warnings=tuple(warnings), partial=partial)
+        warnings=tuple(warnings), partial=partial, hotspots=spots, grid=(rows, cols))
