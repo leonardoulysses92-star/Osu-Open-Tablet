@@ -85,5 +85,9 @@ if ($old) {
 }
 Copy-Item $built (Join-Path $Dest "Osu Open Tablet v$Version.exe") -Force
 
+$asset = Join-Path $root "dist\Osu-Open-Tablet-v$Version.exe"      # no spaces: this is the file to upload to GitHub
+Copy-Item $built $asset -Force
 "Done: $tag built and copied; the previous version is in '$archive'."
-"To publish it:  git push origin main $tag"
+"To publish the code:  git push origin main $tag"
+"To let anyone download it: create a GitHub release for $tag and upload '$asset'."
+"SHA-256 for the release notes: $((Get-FileHash $asset).Hash)"

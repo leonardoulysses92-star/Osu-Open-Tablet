@@ -12,6 +12,20 @@ Tres caminos: **configuración guiada**, **ajuste en vivo** mientras juegas (aco
 
 Está en una fase temprana (0.8.x). Ver [Estado](#estado).
 
+## Descargar y probar
+
+1. Entra en [Releases](https://github.com/leonardoulysses92-star/Osu-Open-Tablet/releases/latest) y descarga `Osu-Open-Tablet-vX.Y.Z.exe`.
+2. Ábrelo con doble clic. No hace falta instalar Python ni nada más; solo tener [OpenTabletDriver](https://opentabletdriver.net) 0.6.x.
+3. Si no quieres tocar tu configuración todavía, abre el `.exe` desde una consola con `--dry-run`: no aplica nada a OpenTabletDriver.
+
+Windows puede avisar con "Windows protegió su equipo" porque el programa **no está firmado digitalmente**. Es normal en programas
+pequeños: pulsa "Más información" y "Ejecutar de todas formas" solo si has descargado el archivo de esta página. Cada versión
+publica su huella SHA-256 en las notas para que puedas comprobarla (`Get-FileHash archivo.exe`). Si prefieres no usar el `.exe`,
+puedes ejecutar el código con Python o compilarlo tú (ver "Uso" más abajo): es el mismo código de este repositorio.
+
+Es una versión temprana y no se ha verificado con todas las tabletas ni con todas las versiones de osu!. Antes de cambiar nada hace
+una copia de seguridad de tus ajustes, y siempre puedes volver atrás. Si algo falla, abre una [incidencia](https://github.com/leonardoulysses92-star/Osu-Open-Tablet/issues).
+
 ## Requisitos
 
 - Windows 10 u 11. Linux y macOS no están probados.

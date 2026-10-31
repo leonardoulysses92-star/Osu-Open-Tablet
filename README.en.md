@@ -12,6 +12,19 @@ Three ways in: a guided setup, live tuning while you play (companion), and the *
 
 Early stage (0.8.x). The live-apply path (OTD Console and daemon pipe) is written from OTD's source and has not been verified on real hardware.
 
+## Download and try it
+
+1. Go to [Releases](https://github.com/leonardoulysses92-star/Osu-Open-Tablet/releases/latest) and download `Osu-Open-Tablet-vX.Y.Z.exe`.
+2. Double-click it. No Python or installer needed; you only need [OpenTabletDriver](https://opentabletdriver.net) 0.6.x.
+3. To look around without touching your settings, start the `.exe` from a console with `--dry-run`: it applies nothing to OpenTabletDriver.
+
+Windows may warn "Windows protected your PC" because the program is **not code-signed**. Click "More info" and "Run anyway" only if you
+downloaded the file from this page. Every release lists its SHA-256 in the notes (`Get-FileHash file.exe`). If you would rather not run
+the `.exe`, run the source with Python or build it yourself (see "Run" below): it is the same code as this repository.
+
+This is an early version, not verified with every tablet or osu! build. A backup of your settings is made before any change.
+Problems: open an [issue](https://github.com/leonardoulysses92-star/Osu-Open-Tablet/issues).
+
 ## Requirements
 
 - Windows 10 or 11. Linux and macOS are untested.
