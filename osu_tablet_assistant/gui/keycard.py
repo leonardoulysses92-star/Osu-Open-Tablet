@@ -42,6 +42,9 @@ class ClickKeysCard(Card):
         self.summary.pack(side="left", padx=(px(self, 10), 0))
         self.open_button = button(self.header, "", self.toggle_open, kind="ghost")
         self.open_button.pack(side="right")
+        # Tk keeps a container at its old size once its last child is unpacked, so the closed card would
+        # stay tall and empty. A 1 px child that is always packed makes it recompute its height.
+        ttk.Frame(self.body, style="Card.TFrame", height=1).pack(fill="x")
         self.details = frame(self.body)
         box = self.details
         WrapLabel(box, self.t("play.keys.intro"), "Small").pack(fill="x")
@@ -87,6 +90,8 @@ class ClickKeysCard(Card):
         self._render()
         if opened:
             self._fit_window()
+        else:
+            self._restore_window()
 
     def _fit_window(self) -> None:
         """Make the window tall enough for the open card (the user can still resize it)."""
@@ -95,7 +100,22 @@ class ClickKeysCard(Card):
             top.update_idletasks()
             need = min(top.winfo_reqheight(), top.winfo_screenheight() - px(self, 80))
             if top.winfo_height() > 1 and top.winfo_height() < need:
+                self.state["grown_from"] = top.winfo_height()     # to give the space back when it closes
+                self.state["grown_to"] = need
                 top.geometry(f"{top.winfo_width()}x{need}")
+        except tk.TclError:
+            pass
+
+    def _restore_window(self) -> None:
+        """Closing the card: undo the growth of :meth:`_fit_window`, unless the user resized the window since."""
+        before, grown = self.state.pop("grown_from", None), self.state.pop("grown_to", None)
+        if before is None or grown is None:
+            return
+        try:
+            top = self.winfo_toplevel()
+            top.update_idletasks()
+            if abs(top.winfo_height() - grown) <= 2:
+                top.geometry(f"{top.winfo_width()}x{before}")
         except tk.TclError:
             pass
 

@@ -212,6 +212,19 @@ class ClickKeysCardTests(unittest.TestCase):
         self.assertGreaterEqual(session.saves, 1)
         self.assertIn("A, ;, Mouse 2", self.texts(win.body))         # the honest text names the chosen keys
 
+    def test_closing_the_card_gives_back_its_height_and_the_window_size(self) -> None:
+        win = self.window(FakeSession())
+        card, top = win.keys_card, win.root
+        closed_h = card.winfo_reqheight()
+        window_h = top.winfo_height()
+        card.toggle_open()
+        top.update()
+        self.assertGreater(card.winfo_reqheight(), closed_h)         # the open card needs room
+        card.toggle_open()
+        top.update()
+        self.assertEqual(card.winfo_reqheight(), closed_h)           # ...and gives it back: no empty box left
+        self.assertLessEqual(abs(top.winfo_height() - window_h), 2)  # the window shrinks back as well
+
     def test_reset_remove_pen_tip_and_typing(self) -> None:
         session = FakeSession(fail=True)                             # saving fails: the coach carries on
         win = self.window(session)
