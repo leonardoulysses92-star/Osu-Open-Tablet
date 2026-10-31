@@ -357,6 +357,143 @@ class ClickKeysCardTests(unittest.TestCase):
 
 
 @unittest.skipUnless(_display_available(), "no display")
+class AreaAndSmoothingCardTests(unittest.TestCase):
+    """The area in numbers, "Ajustar el área a mano" and the smoothing card (synthetic, nothing real is touched)."""
+    HAWKU = "TabletDriverFilters.Hawku.Smoothing"
+
+    def setUp(self) -> None:
+        from osu_tablet_assistant.gui import coach
+        self.coach = coach
+        self.addCleanup(i18n.set_language, "es")
+        i18n.set_language("es")
+        self.env = Env(self)
+
+    def window(self):
+        win = self.coach.CoachWindow(None, core=self.env.core, enable_hotkeys=False, beeper=hk.Beeper(enabled=False))
+        self.addCleanup(win.destroy)
+        win.root.update()
+        return win
+
+    texts = CoachWindowTests.texts
+
+    def test_the_area_card_shows_numbers_and_the_manual_buttons_change_the_area_live(self) -> None:
+        win = self.window()
+        shown = self.texts(win.body)
+        self.assertIn("Área actual: 71,7 × 41,4 mm, centro 80,2 / 26,7 mm, girada 180°", shown)
+        self.assertNotIn(i18n.t("play.area.since"), shown)
+        self.assertEqual(set(win.manual_buttons), {"smaller", "bigger", "left", "right", "up", "down"})
+        self.assertNotIn(i18n.t("play.report.keep"), self.texts(win.footer))   # nothing to save yet
+        win.manual_buttons["left"].invoke()
+        win.root.update()
+        self.assertAlmostEqual(self.env.core.area.x, USER_AREA.x + 0.5, places=3)     # screen left on a turned tablet
+        shown = self.texts(win.body)
+        self.assertIn(i18n.t("play.area.since"), shown)
+        self.assertIn("Centro: 80,2 / 26,7 → 80,7 / 26,7 mm", shown)
+        self.assertIn(i18n.t("play.report.keep"), self.texts(win.footer))      # a change by hand can be saved
+        self.assertEqual(self.env.written, [])
+        win.undo_prepare()
+        win.root.update()
+        self.assertEqual(self.env.core.area, USER_AREA)
+
+    def test_the_manual_fold_remembers_it_is_open_and_one_axis_needs_the_free_proportion(self) -> None:
+        from osu_tablet_assistant.gui.widgets import Expander
+        win = self.window()
+        folds = [w for w in self._all(win.body) if isinstance(w, Expander) and
+                 w._title == i18n.t("play.manual.title")]
+        self.assertFalse(folds[0].is_open)
+        folds[0].toggle()
+        win.show_phase("prepare")
+        win.root.update()
+        folds = [w for w in self._all(win.body) if isinstance(w, Expander) and w._title == i18n.t("play.manual.title")]
+        self.assertTrue(folds[0].is_open)
+        self.assertNotIn("narrower", win.manual_buttons)
+        win._free_var.set(True)
+        win._aspect_changed()
+        win.root.update()
+        self.assertIn("narrower", win.manual_buttons)
+        win.manual_buttons["wider"].invoke()
+        self.assertGreater(self.env.core.area.width, USER_AREA.width)
+        self.assertEqual(self.env.core.area.height, USER_AREA.height)
+
+    def _all(self, widget):
+        out = []
+        for child in widget.winfo_children():
+            out.append(child)
+            out += self._all(child)
+        return out
+
+    def test_the_smoothing_card_is_compact_until_opened_and_try_switches_the_filter_on(self) -> None:
+        win = self.window()
+        card = win.smooth_card
+        self.assertFalse(card.is_open)
+        self.assertFalse(card.details.winfo_ismapped())
+        self.assertIn("Apagados: 4", self.texts(card.summary))         # Radial (screen), both Hawku, Resampler
+        card.toggle_open()
+        win.root.update()
+        self.assertTrue(card.details.winfo_ismapped())
+        self.assertIn(i18n.t("play.smooth.intro"), self.texts(card))
+        self.assertIn(i18n.t("play.smooth.not_installed_row", name="Devocub Antichatter"), self.texts(card))
+        card.vars[self.HAWKU].set(True)
+        card._switched(self.HAWKU)
+        win.root.update()
+        self.assertTrue(next(fc for fc in self.env.core.profile.filters if fc.path == self.HAWKU).enabled)
+        self.assertIsNot(win.smooth_card, card)                       # rebuilt with the new state ...
+        self.assertTrue(win.smooth_card.is_open)                      # ... and still open
+        self.assertIn("Probando: Hawku Smoothing", self.texts(win.smooth_card.summary))
+        self.assertTrue(win.smooth_card.vars[self.HAWKU].get())
+        win.smooth_card.vars[self.HAWKU].set(False)
+        win.smooth_card._switched(self.HAWKU)
+        win.root.update()
+        self.assertEqual(self.env.core.tuner.settings, self.env.core.tuner.original)
+
+    def test_the_report_compares_the_smoothing_and_says_what_the_trial_did(self) -> None:
+        from dataclasses import replace
+        from osu_tablet_assistant.models import Reason
+        win = self.window()
+        win.start_observing()
+        win.stop_observing()                                          # a round without smoothing
+        win.play_again()
+        win.smooth_try(self.HAWKU)
+        win.start_observing()
+        win.stop_observing()
+        win.root.update()
+        shown = self.texts(win.body)
+        self.assertIn(i18n.t("play.smooth.verdict.title"), shown)
+        self.assertIn(i18n.t("play.smooth.keep"), shown)
+        self.assertIn(i18n.t("play.smooth.remove"), shown)
+        self.assertIn(i18n.t("play.area.after").split(":")[0], shown)   # what the proposed change would make it
+        win.smooth_keep(self.HAWKU)
+        win.root.update()
+        self.assertNotIn(i18n.t("play.smooth.verdict.title"), self.texts(win.body))
+        what = Reason("play.probe.what.shift", {"mm": 0.5, "way": "left"})
+        result = self.env.core.result
+        self.env.core.result = replace(result, proposal=replace(result.proposal, probe_outcome=Reason(
+            "play.probe.reverted", {"what": what})))
+        win.show_phase("report")
+        win.root.update()
+        self.assertIn("Probamos mover el área 0,5 mm a la izquierda: no mejoró tu ronda, así que lo devolvemos.",
+                      self.texts(win.body))
+
+    def test_every_new_text_is_translated_in_both_languages(self) -> None:
+        for lang in i18n.SUPPORTED:
+            i18n.set_language(lang)
+            self.env = Env(self)
+            win = self.window()
+            win.smooth_card.toggle_open()
+            win._manual_state["open"] = True
+            win.manual("left")
+            win.smooth_try(self.HAWKU)
+            win.show_phase("prepare")
+            win.root.update()
+            self.assertNotIn("play.", self.texts(win.root))
+            win.start_observing()
+            win.stop_observing()
+            win.root.update()
+            self.assertNotIn("play.", self.texts(win.root))
+            win.destroy()
+
+
+@unittest.skipUnless(_display_available(), "no display")
 class TabletMapTests(unittest.TestCase):
     def test_draws_every_layer_without_errors(self) -> None:
         from osu_tablet_assistant.gui.tabletmap import TabletMap

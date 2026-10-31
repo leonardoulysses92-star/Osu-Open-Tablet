@@ -252,11 +252,12 @@ class ClosedLoopTests(unittest.TestCase):
     MAX_ROUNDS = 14
 
     def run_loop(self, seed: int) -> tuple[list[float], list[str], Rect]:
-        state, area, kind, move, change = opt.new_state(), AREA, "start", (0.0, 0.0), ()
+        state, area, kind, move, change, new_probe = opt.new_state(), AREA, "start", (0.0, 0.0), (), None
         costs, kinds = [], []
         for n in range(self.MAX_ROUNDS):
             report = play(area, 1000 * seed + n)
-            state, report = opt.record_round(state, report, area, (), change=change, kind=kind, move=move)
+            state, report = opt.record_round(state, report, area, (), change=change, kind=kind, move=move,
+                                             new_probe=new_probe)
             if report.cost is not None:
                 costs.append(report.cost)
             kinds.append(kind)
@@ -266,7 +267,7 @@ class ClosedLoopTests(unittest.TestCase):
                     break
                 continue                                       # not enough data: play the same again
             area = proposal.area or area
-            kind, move, change = proposal.kind, proposal.move, proposal.reasons
+            kind, move, change, new_probe = proposal.kind, proposal.move, proposal.reasons, proposal.new_probe
         return costs, kinds, area
 
     def test_converges_in_under_twelve_rounds_without_oscillating(self) -> None:
@@ -282,6 +283,186 @@ class ClosedLoopTests(unittest.TestCase):
         self.assertLess(statistics.fmean(final_gaps), 0.08, final_gaps)
         self.assertTrue(all(best <= first for first, best in first_last))
         self.assertLess(statistics.fmean(b / f for f, b in first_last), 0.9)
+
+
+def weak(bias_x: float = 0.0, gain: float = 1.0, gain_y: float | None = None, **kw) -> PlayReport:
+    """A report whose evidence is too weak for any normal stage (gain intervals include 1, bias below 0.5 mm)."""
+    gy = gain if gain_y is None else gain_y
+    return fake_report(reach=ReachFit(gain, gy, bias_x, 0.0, (0.94, 1.04), (0.94, 1.04), 60), **kw)
+
+
+class ProbeTests(unittest.TestCase):
+    """Area trials when the evidence is weak: labelled, small, bounded, judged by the next round."""
+
+    def first(self, report: PlayReport, aspect_lock: bool = True):
+        state, report = opt.record_round(opt.new_state(), report, AREA, ())
+        return state, opt.propose(state, profile(), report, TABLET, aspect_lock=aspect_lock)
+
+    def test_weak_bias_gives_a_small_labelled_trial_shift_in_the_players_view(self) -> None:
+        state, proposal = self.first(weak(bias_x=0.3))
+        self.assertEqual(proposal.kind, "probe")
+        self.assertEqual(proposal.message.key, "play.msg.probe")
+        self.assertEqual(proposal.reasons[0].key, "play.probe.try")
+        what = proposal.reasons[0].params["what"]
+        self.assertEqual((what.key, what.params["way"]), ("play.probe.what.shift", "right"))
+        self.assertAlmostEqual(proposal.move[0], opt.PROBE_MIN_SHIFT_MM, places=3)   # a 0.3 mm hint: the minimum
+        self.assertAlmostEqual(proposal.area.x, AREA.x - opt.PROBE_MIN_SHIFT_MM, places=3)   # rotation 180: view +x = tablet -x
+        self.assertEqual((proposal.area.width, proposal.area.rotation), (AREA.width, 180.0))
+        self.assertTrue(areafit.area_fits(proposal.area, TABLET))
+        self.assertIsNotNone(proposal.new_probe.live)
+        self.assertIsNone(proposal.probe_outcome)
+
+    def test_weak_gain_gives_a_capped_size_trial(self) -> None:
+        _, proposal = self.first(weak(gain=0.95))                 # a 5 % hint, capped at 3 %
+        self.assertEqual(proposal.kind, "probe")
+        self.assertEqual(proposal.reasons[0].params["what"].params["way"], "smaller")
+        self.assertAlmostEqual(proposal.area.width / AREA.width, 1.0 - opt.PROBE_MAX_SCALE, places=3)
+        self.assertAlmostEqual(proposal.area.width / proposal.area.height, AREA.width / AREA.height, places=3)
+        _, small = self.first(weak(gain=0.998))                   # below the hint floor: nothing to try
+        self.assertEqual(small.kind, "none")
+
+    def test_free_proportion_tries_one_axis(self) -> None:
+        _, proposal = self.first(weak(gain=0.97, gain_y=1.0), aspect_lock=False)
+        self.assertEqual(proposal.kind, "probe")
+        self.assertEqual(proposal.reasons[0].params["what"].params["way"], "narrower")
+        self.assertLess(proposal.area.width, AREA.width)
+        self.assertEqual(proposal.area.height, AREA.height)
+
+    def test_edges_that_fall_short_suggest_a_smaller_area(self) -> None:
+        from osu_tablet_assistant.engine.playtypes import EdgeFinding
+        edges = tuple(EdgeFinding(z, "short", 0.6, 10) for z in ("left", "right", "top", "bottom"))
+        hints = opt.probe_hints(weak(edges=edges))
+        self.assertEqual(hints[0][:2], ("size", "both"))
+        self.assertLess(hints[0][2], 0.0)
+
+    def next_round(self, state, proposal, report):
+        return opt.record_round(state, report, proposal.area, (), change=proposal.reasons, kind=proposal.kind,
+                                move=proposal.move, new_probe=proposal.new_probe)
+
+    def test_a_trial_that_helps_is_kept_and_said_so(self) -> None:
+        state, proposal = self.first(weak(bias_x=0.3, miss=0.05, err=0.35))
+        state, report = self.next_round(state, proposal, weak(bias_x=0.0, miss=0.0, err=0.15))
+        self.assertEqual(state.probe.outcome, "kept")
+        nxt = opt.propose(state, profile(proposal.area), report, TABLET)
+        self.assertEqual(nxt.probe_outcome.key, "play.probe.kept")
+        self.assertEqual(nxt.probe_outcome.params["what"].params["way"], "right")
+        self.assertNotEqual(nxt.kind, "probe_back")
+
+    def test_a_trial_that_does_not_help_is_put_back_and_the_opposite_is_tried(self) -> None:
+        base = weak(bias_x=0.3)
+        state, proposal = self.first(base)
+        state, report = self.next_round(state, proposal, base)          # same cost: not better beyond the noise
+        self.assertEqual(state.probe.outcome, "reverted")
+        nxt = opt.propose(state, profile(proposal.area), report, TABLET)
+        self.assertEqual(nxt.probe_outcome.key, "play.probe.reverted")
+        self.assertEqual(nxt.kind, "probe")
+        self.assertEqual(nxt.undo_area, AREA)                             # counted from the area before the trial
+        self.assertIn("play.probe.from_base", [r.key for r in nxt.reasons])
+        self.assertEqual(nxt.reasons[0].params["what"].params["way"], "left")
+        self.assertAlmostEqual(nxt.area.x, AREA.x + opt.PROBE_MIN_SHIFT_MM, places=3)
+
+    def test_trials_are_bounded_never_repeated_and_end_back_where_they_started(self) -> None:
+        state, proposal = self.first(weak(bias_x=0.4, gain=0.985, err=0.3))
+        seen, areas, kinds = set(), [], []
+        for n in range(30):
+            if proposal.kind not in ("probe", "probe_back"):
+                break
+            kinds.append(proposal.kind)
+            areas.append(proposal.area)
+            if proposal.kind == "probe":
+                key = proposal.new_probe.live.key
+                self.assertNotIn(key, seen)                                # a put-back trial is never repeated
+                seen.add(key)
+            # every trial is worse than the start, alternately a bit less and a bit more (so the plateau rule,
+            # which would normally stop this after two trials, never applies and the budgets are what end it)
+            worse = dict(err=1.5, miss=0.3) if n % 2 else dict(err=0.45)
+            state, report = self.next_round(state, proposal, weak(bias_x=0.4, gain=0.985, **worse))
+            proposal = opt.propose(state, profile(areas[-1]), report, TABLET)
+        self.assertGreater(len(seen), 4)
+        used = dict(state.probe.used)
+        self.assertTrue(all(n <= opt.PROBE_ROUNDS_PER_FAMILY for n in used.values()), used)
+        self.assertEqual(kinds[-1], "probe_back")
+        self.assertEqual(areas[-1], AREA)                                  # nothing helped: back to the start
+        for area in areas:
+            dx, dy = areafit.tablet_to_view(area.x - AREA.x, area.y - AREA.y, 180.0)
+            self.assertLessEqual(math.hypot(dx, dy), opt.PROBE_MAX_SHIFT_MM + 1e-6)
+            self.assertLessEqual(abs(area.width / AREA.width - 1.0), opt.PROBE_MAX_SCALE + 1e-4)
+            self.assertTrue(areafit.area_fits(area, TABLET))
+        self.assertEqual(opt.propose(state, profile(), report, TABLET).kind, "none")   # used up: no new trials
+
+    def test_strong_evidence_still_comes_first(self) -> None:
+        _, proposal = self.first(fake_report(reach=ReachFit(1.0, 1.0, 2.0, 0.0, (0.99, 1.01), (0.99, 1.01), 60)))
+        self.assertEqual(proposal.kind, "shift")
+
+    def test_skipping_a_trial_never_offers_it_again(self) -> None:
+        state, proposal = self.first(weak(bias_x=0.3))
+        state = opt.skip_probe(state, proposal.new_probe)
+        state, report = opt.record_round(state, weak(bias_x=0.3), AREA, ())
+        again = opt.propose(state, profile(), report, TABLET)
+        self.assertEqual(again.kind, "probe")
+        self.assertNotEqual(again.new_probe.live.key, proposal.new_probe.live.key)
+
+    def test_rotation_is_kept_and_the_direction_follows_the_view(self) -> None:
+        upright = replace(AREA, rotation=0.0)
+        state, report = opt.record_round(opt.new_state(), weak(bias_x=0.3), upright, ())
+        proposal = opt.propose(state, profile(upright), report, TABLET)
+        self.assertAlmostEqual(proposal.area.x, upright.x + opt.PROBE_MIN_SHIFT_MM, places=3)   # rotation 0: same way
+        self.assertEqual(proposal.area.rotation, 0.0)
+
+
+class ProbeSimulationTests(unittest.TestCase):
+    """Closed loops on a noisy simulated player (aim scatter 1.5 mm), feeding every proposal back."""
+    NOISE = 1.5
+
+    def loop(self, ideal: Rect, seed: int, rounds: int = 8):
+        state, area, kind, move, change, new_probe = opt.new_state(), AREA, "start", (0.0, 0.0), (), None
+        trace = []
+        for n in range(rounds):
+            player = player_for(area, ideal)
+            player.aim_noise_mm = self.NOISE
+            capture = simulate(MAP, player, seed=1000 * seed + n, area=area, t0=20.0 + n)
+            report = po.analyze_play(MAP, replace(capture, samples=capture.samples[::2]), seed=seed)
+            state, report = opt.record_round(state, report, area, (), change=change, kind=kind, move=move,
+                                             new_probe=new_probe)
+            proposal = opt.propose(state, profile(area), report, TABLET)
+            trace.append((kind, area, report.cost, proposal.kind,
+                          proposal.probe_outcome.key if proposal.probe_outcome else None))
+            if proposal.kind == "none":
+                if proposal.verdict == PLATEAU:
+                    break
+                kind, move, change, new_probe = "start", (0.0, 0.0), (), None
+                continue
+            area = proposal.area or area
+            kind, move, change, new_probe = proposal.kind, proposal.move, proposal.reasons, proposal.new_probe
+        return trace, area
+
+    def test_an_area_too_big_on_x_and_shifted_changes_within_four_rounds_and_ends_better(self) -> None:
+        ideal = Rect(AREA.width / 1.05, AREA.height, AREA.x - 2.0, AREA.y, 180.0)   # 5 % too big on x, 2 mm off
+        for seed in range(4):
+            trace, area = self.loop(ideal, seed)
+            changed = [i for i, step in enumerate(trace) if step[1] != AREA]
+            self.assertTrue(changed and changed[0] <= 3, (seed, trace))        # the area moved by round 4
+            costs = [step[2] for step in trace if step[2] is not None]
+            self.assertLess(costs[-1], costs[0], (seed, costs))
+            self.assertNotEqual(area, AREA)
+
+    def test_a_well_tuned_player_does_not_drift(self) -> None:
+        kept = reverted = probes = 0
+        for seed in range(6):
+            trace, area = self.loop(AREA, seed)
+            for _, played, _, _, outcome in trace:
+                dx, dy = areafit.tablet_to_view(played.x - AREA.x, played.y - AREA.y, 180.0)
+                self.assertLessEqual(max(abs(dx), abs(dy)), opt.PROBE_MAX_SHIFT_MM + 1e-6, (seed, trace))
+                self.assertLessEqual(abs(played.width / AREA.width - 1.0), opt.PROBE_MAX_SCALE + 1e-4, (seed, trace))
+                kept += outcome == "play.probe.kept"
+                reverted += outcome == "play.probe.reverted"
+            probes += sum(step[0] == "probe" for step in trace)
+            self.assertLess(len(trace), 8, (seed, trace))                       # the plateau rule still stops it
+        self.assertGreater(probes, 0)
+        self.assertGreater(reverted, kept)
+
+    def test_the_trials_are_deterministic(self) -> None:
+        self.assertEqual(self.loop(AREA, 3), self.loop(AREA, 3))
 
 
 if __name__ == "__main__":

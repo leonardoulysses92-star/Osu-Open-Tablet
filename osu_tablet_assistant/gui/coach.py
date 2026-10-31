@@ -32,11 +32,12 @@ from ..keys import KeyChoice, display_list
 from ..models import Reason
 from ..otd.livetune import LiveTuner, controller_sender, dry_run_sender
 from . import hotkeys as hk
-from .coachcore import (ANALYSIS_EVERY_S, PHASES, CoachCore, CoachFeedback, Readiness, RoundResult, Translate,
-                        ledger_text, say)
+from .coachcore import (ANALYSIS_EVERY_S, FREE_ONLY, MANUAL_MOVES, PHASES, CoachCore, CoachFeedback, Readiness,
+                        RoundResult, Translate, area_changes, area_summary, ledger_text, say)
 from .companion import companion_args_from_session, make_click_through
 from .i18n import t as default_t
 from .keycard import ClickKeysCard
+from .smoothcard import SmoothingCard
 from .tabletmap import TabletMap
 from .widgets import (COLORS, Card, Chip, Expander, Notice, ScrollFrame, WrapLabel, apply_theme, bullets, button,
                       check, dark_title_bar, frame, icon_image, label, px, surface_color)
@@ -102,6 +103,11 @@ class CoachWindow:
         self.core.set_keys(self.key_choice.effective)
         self.keys_card: ClickKeysCard | None = None
         self._keys_state: dict = {"open": False}       # the key card stays open across screen refreshes
+        self._smooth_state: dict = {"open": False}     # ... and so do the smoothing card ...
+        self._manual_state: dict = {"open": False}     # ... and "Ajustar el área a mano"
+        self.smooth_card: SmoothingCard | None = None
+        self._area_holder: ttk.Frame | None = None
+        self._smooth_holder: ttk.Frame | None = None
         self.beeper = beeper if beeper is not None else hk.Beeper()
         self._actions: queue.Queue[str] = queue.Queue()
         self.hotkeys = hk.HotkeyManager({"coach_toggle": COACH_HOTKEY}, self._actions.put,
@@ -179,6 +185,9 @@ class CoachWindow:
             self.body = ttk.Frame(self._scroll.body, padding=px(self.root, 16))
             self.body.pack(fill="both", expand=True)
         self.map, self.keys_card, self._hint_button = None, None, None
+        self.smooth_card, self._area_holder, self._smooth_holder = None, None, None
+        self.area_card: Card | None = None
+        self.manual_buttons: dict[str, Any] = {}
         self._set_window_mode(compact)
         {"prepare": self._build_prepare, "observe": self._build_observe, "report": self._build_report}[phase]()
 
@@ -241,10 +250,33 @@ class CoachWindow:
         self.map = TabletMap(self.body, height=190)
         self.map.pack(fill="x", pady=(0, px(self.root, 8)))
         self.map.set_setup(core.tablet, core.area, core.display)
+        self._area_holder = frame(self.body)
+        self._area_holder.pack(fill="x", pady=(0, px(self.root, 8)))
+        self._build_area_card(self._area_holder, editable=True)
+        self._smooth_holder = frame(self.body)
+        self._smooth_holder.pack(fill="x", pady=(0, px(self.root, 8)))
+        self._build_smooth_card()
         WrapLabel(self.body, self.t("play.prepare.honest", keys=display_list(core.keys)), "Small").pack(
             fill="x", pady=(0, px(self.root, 10)))
         if core.result is None and core.state.rounds:
             WrapLabel(self.body, self._progress_text(), "Muted").pack(fill="x", pady=(0, px(self.root, 6)))
+        self._mini_var = tk.BooleanVar(value=self.mini is not None)
+        adv = Expander(self.body, self.t("play.prepare.options"), height=9)
+        adv.pack(fill="x", pady=(px(self.root, 10), 0))
+        adv.set(ledger_text(self.t, core.keys))
+        check(self.body, self.t("play.prepare.minimap"), self._mini_var, command=self._toggle_mini).pack(
+            anchor="w", pady=(px(self.root, 2), 0))
+        WrapLabel(self.body, self.t("play.prepare.minimap_note"), "Small").pack(fill="x")
+        if core.state.rounds:
+            self._build_progress_strip(self.body)
+        self._build_prepare_footer(ready)
+
+    def _build_prepare_footer(self, ready: Readiness) -> None:
+        """Messages, "Start observing" and save/restore: the bar that never scrolls away (rebuilt after changes)."""
+        if self.footer is None:
+            return
+        for child in self.footer.winfo_children():
+            child.destroy()
         self.status = Notice(self.footer)               # messages and buttons sit in the bar that never scrolls away
         self.status.pack(fill="x", pady=(0, px(self.root, 6)))
         actions = frame(self.footer)
@@ -257,16 +289,104 @@ class CoachWindow:
         if self.hotkeys.available:
             label(actions, self.t("play.prepare.hotkey", combo=COACH_HOTKEY.replace("+", " + ").title()), "Small").pack(
                 side="left", padx=(px(self.root, 12), 0))
-        self._mini_var = tk.BooleanVar(value=self.mini is not None)
-        adv = Expander(self.body, self.t("play.prepare.options"), height=9)
-        adv.pack(fill="x", pady=(px(self.root, 10), 0))
-        adv.set(ledger_text(self.t, core.keys))
-        check(self.body, self.t("play.prepare.minimap"), self._mini_var, command=self._toggle_mini).pack(
-            anchor="w", pady=(px(self.root, 2), 0))
-        WrapLabel(self.body, self.t("play.prepare.minimap_note"), "Small").pack(fill="x")
-        if core.state.rounds:
-            self._build_progress_strip(self.body)
+        if self.core.state.rounds or self.core.dirty:     # changes by hand can be saved before any round
             self._build_keep_row(self.footer)
+
+    # -- the area in numbers, and by hand
+    def _build_area_card(self, parent: tk.Misc, editable: bool, proposed: Any = None) -> None:
+        """"Área actual: 80 × 45 mm, centro ..." and, once something changed, "antes → ahora" per value."""
+        core = self.core
+        card = Card(parent, self.t("play.area.title"), padding=12)
+        card.pack(fill="x")
+        self.area_card = card
+        WrapLabel(card.body, area_summary(core.area, self.t), "Strong").pack(fill="x")
+        if proposed is not None and proposed != core.area:
+            WrapLabel(card.body, area_summary(proposed, self.t, "play.area.after"), "Body").pack(fill="x")
+        changes = area_changes(core.original_area, core.area, self.t)
+        if changes:
+            WrapLabel(card.body, self.t("play.area.since"), "Small").pack(fill="x", pady=(px(self.root, 4), 0))
+            bullets(card.body, changes, role="Small").pack(fill="x")
+        WrapLabel(card.body, self.t("play.area.otd_note"), "Small").pack(fill="x", pady=(px(self.root, 2), 0))
+        if editable:
+            self._build_manual(card.body)
+
+    def _build_manual(self, parent: tk.Misc) -> None:
+        """"Ajustar el área a mano": size -/+ 2 %, move 0.5 mm, one axis with the free proportion; undo."""
+        fold = Expander(parent, self.t("play.manual.title"), widgets=True, opened=bool(self._manual_state["open"]),
+                        on_toggle=lambda opened: self._manual_state.__setitem__("open", opened))
+        fold.pack(fill="x", pady=(px(self.root, 6), 0))
+        box = fold.content
+        WrapLabel(box, self.t("play.manual.intro"), "Small").pack(fill="x", pady=(0, px(self.root, 4)))
+        self.manual_buttons: dict[str, Any] = {}
+        groups = [("play.manual.size", ("smaller", "bigger")), ("play.manual.move", tuple(MANUAL_MOVES))]
+        if not self.core.aspect_lock:
+            groups.append(("play.manual.axes", FREE_ONLY))
+        for title, actions in groups:
+            row = frame(box)
+            row.pack(fill="x", pady=(px(self.root, 2), 0))
+            label(row, self.t(title), "Strong").pack(side="left", padx=(0, px(self.root, 8)))
+            for action in actions:
+                btn = button(row, self.t(f"play.manual.{action}"), lambda a=action: self.manual(a), kind="secondary")
+                btn.pack(side="left", padx=(0, px(self.root, 4)))
+                self.manual_buttons[action] = btn
+        if self.core.aspect_lock:
+            WrapLabel(box, self.t("play.manual.free_hint"), "Small").pack(fill="x", pady=(px(self.root, 4), 0))
+        undo = button(box, self.t("play.manual.undo"), self.undo_prepare, kind="ghost")
+        undo.pack(anchor="w", pady=(px(self.root, 4), 0))
+        undo.configure(state="normal" if self.core.tuner.can_undo else "disabled")
+
+    def _build_smooth_card(self) -> None:
+        if self._smooth_holder is None:
+            return
+        for child in self._smooth_holder.winfo_children():
+            child.destroy()
+        self.smooth_card = SmoothingCard(self._smooth_holder, self.core.smoothing_options(), self.t,
+                                         self.smooth_try, self.smooth_stop, self._smooth_state)
+        self.smooth_card.pack(fill="x")
+
+    def _refresh_prepare(self) -> None:
+        """After a change by hand: new numbers, the outline on the tablet map, the smoothing card, the footer
+        (the screen is not rebuilt, so it does not scroll back to the top)."""
+        core = self.core
+        if self._area_holder is not None:
+            for child in self._area_holder.winfo_children():
+                child.destroy()
+            self._build_area_card(self._area_holder, editable=True)
+        self._build_smooth_card()
+        if self.map is not None:
+            self.map.set_setup(core.tablet, core.area, core.display)
+        self._build_prepare_footer(core.readiness(refresh=False))
+
+    def manual(self, action: str) -> None:
+        """One press of a button of "Ajustar el área a mano"."""
+        fb = self.core.manual_area(action)
+        if fb.ok:
+            self._refresh_prepare()
+        self._notify(fb)
+
+    def undo_prepare(self) -> None:
+        fb = self.core.undo_last()
+        if fb.ok:
+            self._refresh_prepare()
+        self._notify(fb)
+
+    # -- smoothing the player decides on
+    def smooth_try(self, path: str) -> None:
+        self._smooth_action(lambda: self.core.try_smoothing(path))
+
+    def smooth_stop(self, path: str) -> None:
+        self._smooth_action(lambda: self.core.stop_smoothing(path))
+
+    def smooth_keep(self, path: str) -> None:
+        self._smooth_action(lambda: self.core.keep_smoothing(path))
+
+    def _smooth_action(self, act: Callable[[], CoachFeedback]) -> None:
+        fb = act()
+        if self.core.phase == "prepare":
+            self._refresh_prepare()
+        elif self.core.phase == "report" and self.core.result is not None:
+            self.show_phase("report")
+        self._notify(fb)
 
     def _keys_changed(self, choice: KeyChoice) -> None:
         """The player changed their click buttons: use them, save them, refresh the screen when not listening."""
@@ -281,6 +401,10 @@ class CoachWindow:
         free = bool(self._free_var.get())
         self.core.set_free_aspect(free)
         self._save_config(lambda cfg: setattr(cfg, "free_aspect", free))
+        if self._area_holder is not None:                # the one-axis buttons appear / go away
+            for child in self._area_holder.winfo_children():
+                child.destroy()
+            self._build_area_card(self._area_holder, editable=True)
 
     def _detail_changed(self, detail: str) -> None:
         self.core.set_analysis_detail(detail)
@@ -374,6 +498,12 @@ class CoachWindow:
         self.map.set_setup(core.tablet, core.area, core.display)
         self.map.set_cells(report.cells)
         self.map.add_results(report.results, report.radius_mm)
+        if proposal.probe_outcome is not None:          # what happened to the trial this round was played on
+            card = Card(self.body, self.t("play.probe.title"), padding=12)
+            card.pack(fill="x", pady=(0, px(self.root, 8)))
+            WrapLabel(card.body, self._say(proposal.probe_outcome), "Strong").pack(fill="x")
+        for verdict in core.smoothing_verdicts():
+            self._build_smooth_verdict(verdict)
         card = Card(self.body, self.t("play.report.found_title"))
         card.pack(fill="x", pady=(0, px(self.root, 8)))
         bullets(card.body, [self._say(r) for r in result.findings[:4]]).pack(fill="x")
@@ -389,6 +519,9 @@ class CoachWindow:
             WrapLabel(card.body, self.t("play.report.live_note"), "Small").pack(fill="x", pady=(px(self.root, 4), 0))
         elif proposal.message:
             WrapLabel(self.body, self._say(proposal.message), "Muted").pack(fill="x", pady=(0, px(self.root, 8)))
+        holder = frame(self.body)
+        holder.pack(fill="x", pady=(0, px(self.root, 8)))
+        self._build_area_card(holder, editable=False, proposed=proposal.area if proposal.kind != "none" else None)
         self._build_progress_strip(self.body)
         WrapLabel(self.body, self._say(result.convergence.message), "Strong").pack(fill="x", pady=(0, px(self.root, 8)))
         if result.from_replay:
@@ -425,6 +558,20 @@ class CoachWindow:
         tech = Expander(self.body, self.t("gui.details.title"), height=8)
         tech.pack(fill="x", pady=(px(self.root, 6), 0))
         tech.set(self._technical_text(report, result))
+
+    def _build_smooth_verdict(self, verdict: Any) -> None:
+        """"Con el suavizado: mejor / igual / peor" for one trial, and the player's two choices."""
+        card = Card(self.body, self.t("play.smooth.verdict.title"), padding=12)
+        card.pack(fill="x", pady=(0, px(self.root, 8)))
+        key = "play.smooth.verdict.no_base" if verdict.no_base else f"play.smooth.verdict.{verdict.verdict}"
+        WrapLabel(card.body, self.t(key, name=verdict.name), "Strong").pack(fill="x")
+        WrapLabel(card.body, self.t("play.smooth.verdict.decide"), "Small").pack(fill="x", pady=(px(self.root, 2), 0))
+        row = frame(card.body)
+        row.pack(fill="x", pady=(px(self.root, 6), 0))
+        button(row, self.t("play.smooth.keep"), lambda p=verdict.path: self.smooth_keep(p), kind="secondary").pack(
+            side="left")
+        button(row, self.t("play.smooth.remove"), lambda p=verdict.path: self.smooth_stop(p), kind="ghost").pack(
+            side="left", padx=(px(self.root, 8), 0))
 
     def _build_check(self, check: Any) -> None:
         """How well the coach's inference matched the game's own replay (plain words, one line + one hint)."""
@@ -513,8 +660,10 @@ class CoachWindow:
         self._notify(fb)
 
     def skip(self) -> None:
-        self.core.skip_proposal()
+        fb = self.core.skip_proposal()
         self.show_phase("prepare")
+        if fb is not None:                     # e.g. a trial that did not help was still put back
+            self._notify(fb)
 
     def undo(self) -> None:
         fb = self.core.undo_last()

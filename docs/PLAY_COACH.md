@@ -185,7 +185,40 @@ Shared data types live in `engine/playtypes.py`. `gui/coachcore.py` has all the 
      and never moves more than 1.5 mm. When nothing is worth changing but a hotspot exists, the proposal is
      "none" with "the problem is only in a small zone (where): play that zone more";
   4. **filters**, only through `adapt.step()` (plugin policy and safety limits of the companion):
-     lag on fast jumps -> "more responsive", jitter on slow parts -> "steadier at rest", both -> nothing.
+     lag on fast jumps -> "more responsive", jitter on slow parts -> "steadier at rest", both -> nothing;
+  5. **area trial ("probe")**, only when none of the above has evidence (see below).
+* **Area trials** (`optimizer.ProbeState`). A real player's round is noisy, so the stages above often have no
+  significant evidence and, before, the coach ended with "nothing to change" while the area never moved. Now
+  the point estimates pick a small trial instead:
+  * hints: the reach bias per axis (shift, mm in the player's view) and `gain - 1` per axis plus 0.5 % for
+    every edge zone that falls short (-) / goes over (+) (size; one "both" hint with the aspect locked, one per
+    axis with the free proportion). Hints below 0.1 mm / 0.3 % mean "no hint": nothing is tried. When the only
+    problem is a small zone (a hotspot) the local rule still wins ("practise that zone"): a whole-area trial
+    cannot fix one zone, so hotspot errors are not used for trials;
+  * step: the hint, between 0.5 mm and **1.5 mm** for a shift and between 1 % and **3 %** for a size change,
+    times the trust region (0.1 mm / 0.5 % grid). Shifts go through `areafit.shift_area` in the player's view,
+    so 180 stays 180 and "right" is the right of the screen; the area never leaves the tablet;
+  * the proposal says plainly that it is a trial ("Probamos mover el área 1,2 mm a la derecha; si no mejora, lo
+    devolvemos") and the next report says what happened ("...: no mejoró tu ronda, así que lo devolvemos" /
+    "...: tu ronda mejoró, así que lo dejamos");
+  * judging: the round played on the trial is compared with the round before it. **Kept** when the cost
+    improved by more than `max(2 %, noise)` (the same threshold as the stop rule), otherwise **put back**. A
+    put-back trial is undone and, in the same step, the next one is tried from the previous area: the opposite
+    direction, then both directions at half the step, then the next hint. After a kept trial the same
+    direction is tried again (never straight back);
+  * bounds: at most **4 trial rounds per family** (shift, size) per coach session; a put-back or skipped trial
+    is never repeated; kept trials never add up to more than one cap (1.5 mm per axis, 3 %) from where probing
+    started; an evidence-based change, a revert, or a change by hand starts the trials over from a fresh
+    estimate (budgets stay used). The plateau rule still applies: in practice, when nothing helps, it stops
+    after **two** trials (the trial and its opposite) and the area goes back to where it was ("probe_back");
+  * skipping a trial that would also put a failed trial back still puts that area back; undoing a trial
+    marks it as tried.
+  * In the simulations (`tests/test_optimizer.py`, noisy player with 1.5 mm aim scatter, 90-object map, 10
+    seeds): a player whose area is 5 % too big on x and 2 mm off got a changed area after the first round in
+    10/10 seeds (mostly by the ordinary shift/scale stages: that error is big enough to be significant) and
+    ended better than it started in 10/10; a well-tuned player got 21 trial rounds in total, 20 put back and 1
+    kept (by chance, a 2 % size change), ended exactly where it started in 8/10 seeds and never further than
+    the caps (largest final change 2 % / 0.3 mm), and the plateau rule stopped every run within 3-6 rounds.
 * **Trust region**: halved when a round is worse or a movement reverses; a movement that was undone is not
   proposed again; the area never leaves the tablet; if a round is worse than the best by more than the
   noise, the proposal is to go back to the best round's settings.
@@ -193,17 +226,62 @@ Shared data types live in `engine/playtypes.py`. `gui/coachcore.py` has all the 
   `max(2 %, noise)`, or nothing useful is left to move. With too little data (few matched clicks, bad
   alignment) the verdict is `insufficient`, nothing changes and the message is "play more of the same map".
 
+## Your area in numbers, and by hand
+
+* The prepare and report screens show the area as OTD stores it ("Área actual: 80 × 45 mm, centro 76,6 /
+  45,2 mm, girada 180°", the same Width / Height / X / Y as in OTD) and, once anything changed since the coach
+  opened, "antes → ahora" for width, height and centre. The report also says what the proposed change would
+  make it. Text helpers: `coachcore.area_summary`, `area_changes`, `fmt_num` (decimal comma in Spanish).
+* **"Ajustar el área a mano"** (a fold-out in the area card, its open state remembered): size -/+ 2 % (the
+  proportion kept), move left / right / up / down 0.5 mm in the **player's view** (left = left of the
+  screen, also with rotation 180, through `areafit`), and with the free proportion on, width and height
+  -/+ 2 % separately (then `LockAspectRatio` is set to false, as for proposals). Each press is one live change
+  through the `LiveTuner` (bounded to the tablet, undoable with "Deshacer", the first one makes the backup),
+  updates the numbers and the outline on the tablet map, and is **not saved** until "Guardar estos ajustes"
+  (which now also appears before the first round once something changed). A round played after a change by
+  hand is recorded as `manual` (not attributed to a proposal).
+
+## Smoothing: you decide
+
+Many players have smoothing filters installed but switched off (OTD shows them unticked); the coach used to
+leave them alone ("tune only what is enabled") and had nothing to tune. Now:
+
+* the prepare screen has a **"Suavizado" card**, collapsed by default (its open state remembered), that lists
+  the catalog's ordinary smoothing filters (`engine/smoothing.offered`: not "advanced", not prediction-like;
+  i.e. Radial Follow tablet/screen, Hawku Smoothing, Hawku Noise Reduction, Devocub Antichatter, Temporal
+  Resampler, Chatter Exterminator) with one plain sentence of what each does, how it feels, the estimated
+  extra delay (`recommend.chain_latency`, rough) and a **"Probar"** switch. Installed = the session's plugin
+  scan, the filters in the profile and the other filters of the same plugins; the rest are shown greyed with
+  "no instalado" and a hint that they are added in OTD's Plugin Manager. Nothing is ever installed;
+* "Probar" switches the filter on live (undoable, not saved): a store already in the profile is switched on
+  with the player's own values when they are inside the catalog bounds; an installed filter missing from the
+  profile is inserted at its chain position (`adapt.insert_in_chain`) with **gentle starting values**
+  (heuristic, documented in `engine/smoothing.py`): Radial Follow tablet 0.5 mm / coefficient 0.9, screen 5 px /
+  0.9, Hawku 3 ms, Noise Reduction 10 samples / 0.3 mm, Devocub 4 ms, Temporal Resampler without extra latency.
+  Prediction is never switched on (Devocub prediction off; Temporal Resampler `frameShift` never above its
+  neutral 0.5) and is not mentioned in the texts;
+* after a round played **with** it, the report shows **"Con el suavizado: mejor / igual / peor"** (the cost of
+  that round against the last accepted round without it, with the same threshold as the round marks; "not
+  enough data" or "no round without it to compare with" when that is so) and two buttons: **"Dejarlo"** (it
+  stays live and is saved with "Guardar estos ajustes") and **"Quitarlo"** (switched off again with the values
+  it had, or taken out of the chain). Nothing about the choice is stored anywhere else;
+* the optimizer never switches smoothing on or off by itself for this: its filter stage is unchanged (it may
+  tune the values of a filter the player switched on, like any enabled filter), and "back to the best round"
+  keeps the smoothing the player chose as it is live.
+
 ## The window
 
 1. **Prepare**: is osu! open, which map, your click buttons (one line; "Change" opens detection, reset,
-   the pen-tip box, typing by hand and the detail of the miss map), the tablet map with the current area, one
+   the pen-tip box, typing by hand and the detail of the miss map), the tablet map with the current area, the
+   area card (numbers, "antes → ahora", "Ajustar el área a mano"), the "Suavizado" card, one
    big "Start observing" button (global hotkey `Ctrl+Alt+P` too).
 2. **Observing**: a small always-on-top window with the live tablet map ("Finding the rhythm..." until the
    alignment quality reaches 0.6). It stops by itself after ~8 s without clicks once there are 20 or more.
    An optional click-through mini-map can sit in a screen corner (off by default; it is **not visible in
    exclusive full screen**, use borderless).
-3. **Report**: tablet heat map, at most 4 findings in plain words, the single proposed change and the buttons
-   "Apply and play again" (main), "Skip this change", "Undo last change".
+3. **Report**: tablet heat map, what happened to the trial of the previous round (if any), "Con el
+   suavizado" (if a smoothing trial was played), at most 4 findings in plain words, the single proposed change,
+   the area card and the buttons "Apply and play again" (main), "Skip this change", "Undo last change".
 4. **Progress**: one mark per round (better / same / worse, no numbers), the stop message, "Save these
    settings" and "Restore my original settings".
 
@@ -236,12 +314,24 @@ The first change makes the backup, like the companion.
   be trusted; with fewer objects the coach simply says nothing about them.
 * Each live change rebuilds OTD's filter pipeline (a tiny hitch is possible); the OTD GUI keeps its own copy
   of the settings, and pressing Save there overwrites the coach's live values (see `COMPANION.md`).
+* **Area trials are heuristic.** The caps (1.5 mm, 3 %), the minimum steps, the hint floors, the 0.5 % per
+  edge zone and the budget of 4 trials per family are estimates, not calibrated. One round is noisy: a trial
+  that truly helps a little is often put back (it has to beat the noise of a single round), and now and then
+  one that does not help is kept by chance (bounded by the caps). Whether the new area really *feels* better
+  was not verified with a real pen and osu!.
+* **Smoothing trials are heuristic too.** The gentle starting values, the delay estimates and the
+  descriptions are reasonable starting points written from the plugins' documentation, not measured with this
+  user's tablet; the "better / same / worse" line compares two single rounds (possibly on different maps) and
+  says nothing about how it feels. That is why the player decides.
 
 ## Tests
 
 All synthetic (`tests/playsim.py` simulates a player with a known gain, bias, lag, jitter and timing noise);
 nothing touches osu!, a real driver or the user's files: `test_playobserve.py`, `test_optimizer.py`
-(including a closed loop over 20 seeds and the local-problem rules), `test_hotspots.py` (a player who stops
+(including a closed loop over 20 seeds, the local-problem rules, the area-trial logic and two noisy closed
+loops: an area 5 % too big and 2 mm off, and a well-tuned player that must not drift), `test_coach.py` (area
+texts, changes by hand, smoothing trials through a fake `LiveTuner`), `test_coach_gui.py` (the new cards, both
+languages), `test_hotspots.py` (a player who stops
 short only in a small corner patch: found by the fine grids, smeared by the coarse one, no false alarms,
 speed), `test_keys.py` (names, virtual-key codes, Tk events, the choice), `test_beatmap.py`, `test_areafit.py`,
 `test_findings.py`, `test_coach.py`, `test_coach_gui.py` (the click-button card with synthetic key events).

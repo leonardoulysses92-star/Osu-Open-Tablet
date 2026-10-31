@@ -310,6 +310,280 @@ class RoundTests(unittest.TestCase):
         self.assertEqual(text, "Te quedas corto en la esquina inferior derecha: ≈ 3 mm")
 
 
+USER_OTD_AREA = Rect(80.0, 45.0, 76.571, 45.167, 180.0)      # the area in the user's OTD screenshots
+
+
+class AreaTextTests(unittest.TestCase):
+    def setUp(self) -> None:
+        from osu_tablet_assistant.gui import i18n
+        self.i18n = i18n
+        self.addCleanup(i18n.set_language, "es")
+
+    def test_the_current_area_in_plain_numbers_in_both_languages(self) -> None:
+        self.i18n.set_language("es")
+        self.assertEqual(coach.area_summary(USER_OTD_AREA), "Área actual: 80 × 45 mm, centro 76,6 / 45,2 mm, girada 180°")
+        self.assertEqual(coach.area_summary(replace(USER_OTD_AREA, rotation=0.0)),
+                         "Área actual: 80 × 45 mm, centro 76,6 / 45,2 mm")
+        self.i18n.set_language("en")
+        self.assertEqual(coach.area_summary(USER_OTD_AREA),
+                         "Current area: 80 × 45 mm, centre 76.6 / 45.2 mm, rotated 180°")
+
+    def test_before_and_now_only_once_something_changed(self) -> None:
+        self.i18n.set_language("es")
+        self.assertEqual(coach.area_changes(USER_OTD_AREA, USER_OTD_AREA), [])
+        moved = replace(USER_OTD_AREA, width=78.4, height=44.1, x=77.8)
+        self.assertEqual(coach.area_changes(USER_OTD_AREA, moved),
+                         ["Ancho: 80 → 78,4 mm", "Alto: 45 → 44,1 mm", "Centro: 76,6 / 45,2 → 77,8 / 45,2 mm"])
+        self.assertEqual(coach.area_changes(USER_OTD_AREA, replace(USER_OTD_AREA, x=77.0))[:2],
+                         ["Ancho: 80 mm (igual)", "Alto: 45 mm (igual)"])
+
+    def test_trials_are_said_in_plain_words(self) -> None:
+        from osu_tablet_assistant.models import Reason
+        what = Reason("play.probe.what.shift", {"mm": 1.2, "way": "right"})
+        self.i18n.set_language("es")
+        self.assertEqual(coach.say(Reason("play.probe.try", {"what": what})),
+                         "Probamos mover el área 1,2 mm a la derecha; si no mejora, lo devolvemos.")
+        self.assertEqual(coach.say(Reason("play.probe.reverted", {"what": what})),
+                         "Probamos mover el área 1,2 mm a la derecha: no mejoró tu ronda, así que lo devolvemos.")
+        size = Reason("play.probe.what.size", {"pct": 2.0, "way": "smaller"})
+        self.assertEqual(coach.say(Reason("play.probe.kept", {"what": size})),
+                         "Probamos hacer el área un 2 % más pequeña: tu ronda mejoró, así que lo dejamos.")
+        self.i18n.set_language("en")
+        self.assertEqual(coach.say(Reason("play.probe.try", {"what": what})),
+                         "We try to move the area 1.2 mm to the right; if it does not help, we put it back.")
+
+
+class ManualAreaTests(unittest.TestCase):
+    def view_move(self, before: Rect, after: Rect) -> tuple[float, float]:
+        dx, dy = areafit.tablet_to_view(after.x - before.x, after.y - before.y, before.rotation)
+        return round(dx, 3), round(dy, 3)
+
+    def test_moves_are_in_the_players_view_even_with_rotation_180(self) -> None:
+        env = Env(self)
+        for action, expected in (("left", (-0.5, 0.0)), ("right", (0.5, 0.0)), ("up", (0.0, -0.5)),
+                                 ("down", (0.0, 0.5))):
+            before = env.core.area
+            fb = env.core.manual_area(action)
+            self.assertTrue(fb.ok and fb.live_only, action)
+            self.assertEqual(self.view_move(before, env.core.area), expected, action)
+            self.assertEqual(env.core.area.rotation, 180.0)
+        self.assertEqual(len(env.sent), 4)                           # each press is one live change
+        self.assertEqual(env.written, [])                            # nothing saved until Keep
+        self.assertEqual(env.core.area, USER_AREA)                   # left+right, up+down: back where it was
+
+    def test_left_on_a_turned_tablet_is_plus_x_in_tablet_millimetres(self) -> None:
+        env = Env(self)
+        env.core.manual_area("left")
+        self.assertAlmostEqual(env.core.area.x, USER_AREA.x + 0.5, places=3)   # rotation 180: screen left = tablet +x
+
+    def test_size_keeps_the_proportion_and_one_axis_needs_the_free_proportion(self) -> None:
+        env = Env(self)
+        self.assertTrue(env.core.manual_area("smaller").ok)
+        self.assertAlmostEqual(env.core.area.width, USER_AREA.width * 0.98, places=2)
+        self.assertAlmostEqual(env.core.area.width / env.core.area.height, USER_AREA.width / USER_AREA.height, places=3)
+        refused = env.core.manual_area("narrower")
+        self.assertFalse(refused.ok)
+        self.assertEqual(refused.message.key, "play.manual.needs_free")
+        env.core.set_free_aspect(True)
+        height = env.core.area.height
+        self.assertTrue(env.core.manual_area("wider").ok)
+        self.assertEqual(env.core.area.height, height)
+        self.assertFalse(env.core.profile.lock_aspect_ratio)          # OTD must not snap it back to 16:9
+
+    def test_undo_takes_each_press_back_and_the_tablet_bounds_hold(self) -> None:
+        env = Env(self)
+        env.core.manual_area("right")
+        env.core.manual_area("bigger")
+        self.assertTrue(env.core.undo_last().ok)
+        self.assertTrue(env.core.undo_last().ok)
+        self.assertEqual(env.core.area, USER_AREA)
+        for _ in range(200):                                          # push it against the edge of the tablet
+            if not env.core.manual_area("up").ok:
+                break
+        self.assertEqual(env.core.manual_area("up").message.key, "play.manual.no_room")
+        self.assertTrue(areafit.area_fits(env.core.area, CTL472))
+
+    def test_a_change_by_hand_is_not_attributed_to_a_proposal(self) -> None:
+        env = Env(self)
+        env.play_round()
+        env.core.apply_proposal()
+        env.core.manual_area("left")
+        env.play_round()
+        self.assertEqual(env.core.state.rounds[-1].kind, "manual")
+        self.assertFalse(env.core.manual_area("nonsense").ok)
+
+    def test_trials_run_through_the_coach_and_the_report_says_what_happened(self) -> None:
+        env = Env(self)
+        seeds = iter(range(1, 50))
+
+        def tuned(area: Rect) -> FakeRecorder:                        # a noisy player whose area already fits
+            rec = FakeRecorder(area, 1)
+            player = player_for(area, USER_AREA)
+            player.aim_noise_mm = 1.5
+            rec.capture = simulate(MAP, player, seed=next(seeds), area=area, display=DISPLAY, t0=30.0)
+            return rec
+
+        env.core._recorder_factory = tuned                            # type: ignore[assignment]
+        results = []
+        for _ in range(6):
+            result = env.play_round()
+            results.append(result)
+            if result.proposal.kind == "none":
+                break
+            self.assertTrue(env.core.apply_proposal().ok)
+        kinds = [r.kind for r in env.core.state.rounds]
+        self.assertIn("probe", kinds)
+        outcomes = [r.proposal.probe_outcome.key for r in results if r.proposal.probe_outcome is not None]
+        self.assertTrue(outcomes)
+        self.assertTrue(set(outcomes) <= {"play.probe.kept", "play.probe.reverted"})
+        self.assertTrue(areafit.area_fits(env.core.area, CTL472))
+        self.assertEqual(env.core.area.rotation, 180.0)
+
+    def test_skipping_a_trial_still_puts_the_previous_one_back(self) -> None:
+        from osu_tablet_assistant.engine import optimizer as opt
+        env = Env(self)
+        env.play_round()
+        env.core.manual_area("left")                                  # the live area is now "the failed trial"
+        trial = opt.RoundProposal("probe", "improving", area=replace(USER_AREA, y=USER_AREA.y + 0.5),
+                                  undo_area=USER_AREA, new_probe=opt.ProbeState())
+        env.core.result = replace(env.core.result, proposal=trial)
+        fb = env.core.skip_proposal()
+        self.assertEqual(fb.message.key, "play.probe.skip_back")
+        self.assertEqual(env.core.area, USER_AREA)
+
+
+HAWKU = "TabletDriverFilters.Hawku.Smoothing"
+NOISE = "OpenTabletDriver.Plugin.NoiseReduction"
+RESAMPLER = "TemporalResampler"
+RADIAL_SCREEN = "RadialFollow.RadialFollowSmoothingScreenSpace"
+RADIAL_TABLET = "RadialFollow.RadialFollowSmoothingTabletSpace"
+ANTICHATTER = "TabletDriverFilters.Devocub.Antichatter"
+
+
+class SmoothingTests(unittest.TestCase):
+    """The player tries smoothing filters that are installed but switched off (as in the user's OTD)."""
+
+    def store(self, env: Env, path: str):
+        return next((fc for fc in env.core.profile.filters if fc.path == path), None)
+
+    def test_the_card_lists_installed_filters_and_greys_the_others(self) -> None:
+        options = {o.path: o for o in Env(self).core.smoothing_options()}
+        self.assertTrue(options[HAWKU].installed and not options[HAWKU].on)
+        self.assertTrue(options[RADIAL_TABLET].was_on)                # the user already had it on
+        self.assertTrue(options[RADIAL_SCREEN].installed)              # same plugin as Radial Follow (tablet)
+        self.assertFalse(options[ANTICHATTER].installed)               # not in this OTD: greyed, never installed
+        self.assertAlmostEqual(options[HAWKU].delay_ms, 2.0)          # the user's own latency (inside bounds)
+        self.assertEqual(options[HAWKU].text_id, "hawku")
+        self.assertNotIn("FrenetSerretFramePredictor.FrenetSerretFramePredictor", options)   # prediction: never offered
+
+    def test_trying_a_disabled_filter_keeps_the_players_values_and_taking_it_out_restores_them(self) -> None:
+        env = Env(self)
+        before = self.store(env, HAWKU)
+        fb = env.core.try_smoothing(HAWKU)
+        self.assertTrue(fb.ok and fb.live_only)
+        self.assertIn("play.smooth.own_values", [r.key for r in fb.reasons])
+        live = self.store(env, HAWKU)
+        self.assertTrue(live.enabled)
+        self.assertEqual((live.settings["Latency"], live.settings["Frequency"]), (2.0, 1000.0))
+        self.assertEqual((len(env.sent), env.written), (1, []))         # live, not saved
+        self.assertIn(HAWKU, env.core.trials)
+        self.assertTrue(env.core.stop_smoothing(HAWKU).ok)
+        self.assertEqual(self.store(env, HAWKU), before)
+        self.assertEqual(env.core.tuner.settings, env.core.tuner.original)
+        self.assertNotIn(HAWKU, env.core.trials)
+
+    def test_an_installed_filter_missing_from_the_profile_is_inserted_with_gentle_values(self) -> None:
+        env = Env(self)
+        self.assertIsNone(self.store(env, RADIAL_SCREEN))
+        self.assertTrue(env.core.try_smoothing(RADIAL_SCREEN).ok)
+        added = self.store(env, RADIAL_SCREEN)
+        self.assertTrue(added.enabled)
+        self.assertEqual((added.settings["OuterRadius"], added.settings["InnerRadius"]), (5.0, 0.0))
+        paths = [fc.path for fc in env.core.profile.filters]
+        self.assertLess(paths.index(RADIAL_TABLET), paths.index(RADIAL_SCREEN))   # its place in the chain
+        env.core.stop_smoothing(RADIAL_SCREEN)
+        self.assertIsNone(self.store(env, RADIAL_SCREEN))
+
+    def test_not_installed_or_observing_changes_nothing(self) -> None:
+        env = Env(self)
+        fb = env.core.try_smoothing(ANTICHATTER)
+        self.assertEqual((fb.ok, fb.message.key), (False, "play.smooth.not_installed"))
+        self.assertFalse(env.core.try_smoothing(RADIAL_TABLET).ok)      # already on: nothing to try
+        env.core.readiness()
+        env.core.start()
+        self.assertFalse(env.core.try_smoothing(HAWKU).ok)
+        self.assertEqual(env.sent, [])
+
+    def test_prediction_is_never_switched_on(self) -> None:
+        from osu_tablet_assistant.engine import smoothing
+        from osu_tablet_assistant.knowledge.filters import load_catalog
+        from osu_tablet_assistant.models import FilterConfig
+        catalog = load_catalog()
+        values, _ = smoothing.start_settings(catalog[ANTICHATTER], {"PredictionEnabled": True, "Latency": 6.0})
+        self.assertFalse(values["PredictionEnabled"])
+        self.assertEqual(values["Latency"], 6.0)
+        filters, _, _ = smoothing.enable((FilterConfig(RESAMPLER, False, {"frameShift": 0.8}),), RESAMPLER, catalog)
+        self.assertEqual(filters[0].settings["frameShift"], 0.5)        # never above its neutral default
+        out_of_bounds, own = smoothing.start_settings(catalog[HAWKU], {"Latency": 500.0})
+        self.assertEqual((out_of_bounds["Latency"], own), (3.0, False))   # outside the bounds: the gentle value
+
+    def test_after_a_round_with_it_the_report_compares_and_the_player_decides(self) -> None:
+        env = Env(self)
+        env.play_round()                                              # a round without smoothing
+        env.core.result = None
+        env.core.phase = "prepare"
+        env.core.try_smoothing(HAWKU)
+        self.assertEqual(env.core.smoothing_verdicts(), [])            # not played with it yet
+        env.play_round()
+        verdicts = env.core.smoothing_verdicts()
+        self.assertEqual([v.path for v in verdicts], [HAWKU])
+        self.assertIn(verdicts[0].verdict, ("better", "same", "worse"))
+        self.assertEqual(env.core.state.rounds[-1].kind, "smoothing")  # not attributed to an area change
+        self.assertTrue(env.core.keep_smoothing(HAWKU).ok)
+        self.assertEqual(env.core.smoothing_verdicts(), [])
+        self.assertTrue(self.store(env, HAWKU).enabled)                # "Dejarlo": still live ...
+        self.assertTrue(env.core.keep().ok)                            # ... and saved with the normal Keep
+        saved = next(s for s in env.written[-1]["Profiles"][0]["Filters"] if s["Path"] == HAWKU)
+        self.assertTrue(saved["Enable"])
+
+    def test_tried_before_any_round_says_there_is_nothing_to_compare_with(self) -> None:
+        env = Env(self)
+        env.core.try_smoothing(NOISE)
+        env.play_round()
+        verdict = env.core.smoothing_verdicts()[0]
+        self.assertEqual((verdict.verdict, verdict.no_base), ("unclear", True))
+        self.assertTrue(env.core.stop_smoothing(NOISE).ok)              # "Quitarlo" from the report
+        self.assertFalse(self.store(env, NOISE).enabled)
+
+    def test_the_coach_never_takes_the_players_smoothing_away_on_its_own(self) -> None:
+        from osu_tablet_assistant.engine import optimizer as opt
+        env = Env(self)
+        env.play_round()
+        env.core.result = None
+        env.core.phase = "prepare"
+        env.core.try_smoothing(HAWKU)
+        env.play_round()
+        original = env.core._original_filters
+        back = opt.RoundProposal("revert", "worse", area=replace(USER_AREA, x=USER_AREA.x + 1.0), filters=original,
+                                 revert_to=0)
+        env.core.result = replace(env.core.result, proposal=back)
+        self.assertTrue(env.core.apply_proposal().ok)
+        self.assertTrue(self.store(env, HAWKU).enabled)                # "back to the best round" kept it on
+
+    def test_undo_ends_the_trial(self) -> None:
+        env = Env(self)
+        env.core.try_smoothing(HAWKU)
+        self.assertTrue(env.core.undo_last().ok)
+        self.assertFalse(self.store(env, HAWKU).enabled)
+        self.assertEqual(env.core.trials, {})
+
+    def test_restore_original_clears_the_trials(self) -> None:
+        env = Env(self)
+        env.core.try_smoothing(HAWKU)
+        env.core.restore_original()
+        self.assertEqual((env.core.trials, env.core.tuner.settings), ({}, env.core.tuner.original))
+
+
 class ReplayRoundTests(unittest.TestCase):
     def osr(self, env: Env, md5: str | None = None, junk: bool = False) -> Path:
         from test_replay import make_osr

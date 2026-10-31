@@ -73,13 +73,13 @@ osu-open-tablet/
       community.py              presets -> candidates, area adaptation, comparison, suggestions
       metrics.py                pure functions: samples -> MetricsReport     [tests]
       judge.py                  repeated runs -> median, grade in words, reliability, ties
-      playtypes.py beatmap.py areafit.py playobserve.py optimizer.py findings.py
+      playtypes.py beatmap.py areafit.py playobserve.py optimizer.py findings.py smoothing.py
                                 Play Coach engine, see docs/PLAY_COACH.md
     gui/
       app.py wizard.py session.py widgets.py i18n.py                         [gui]
       live_tests.py             tkinter pen tests that yield samples         [tests]
-      playwatch.py coachcore.py coach.py tabletmap.py mapgeometry.py palette.py
-                                Play Coach (recorder, logic without Tk, window, tablet map)
+      playwatch.py coachcore.py coach.py keycard.py smoothcard.py tabletmap.py mapgeometry.py palette.py
+                                Play Coach (recorder, logic without Tk, window, cards, tablet map)
     locales/{es,en}/*.json      i18n, one file per owner (see below)
   tests/                        unittest, one test module per source module
   docs/

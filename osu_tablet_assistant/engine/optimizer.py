@@ -14,7 +14,14 @@ One round = the player plays a map, ``playobserve`` produces a ``PlayReport``,
    zone" and where it is;
 4. **filters**, only through ``adapt.step`` so the plugin policy and the safety limits of the
    companion mode apply: lag on fast jumps -> "more responsive", jitter on slow parts -> "steadier
-   at rest", both -> nothing (ambiguous).
+   at rest", both -> nothing (ambiguous);
+5. **area probe** (a *trial*), only when none of the above has evidence: the point estimates (reach gains,
+   bias, edge zones that fall short / go over) choose a small, clearly labelled trial move of the area (at
+   most ``PROBE_MAX_SHIFT_MM`` / ``PROBE_MAX_SCALE``). The next round measures it: kept when the cost
+   improved beyond the noise, otherwise it is put back (and, in the same step, the opposite direction or a
+   smaller step is tried). Bounded: ``PROBE_ROUNDS_PER_FAMILY`` trials per family (shift, size) per
+   session, a reverted trial is never repeated, kept trials never add up to more than one cap from where
+   probing started, and the plateau rule still stops everything. See ``ProbeState``.
 
 Direction of a shift. The cursor error is ``cursor - object``. Moving the area by ``+e`` (in the
 player's view) shifts the cursor by ``-e`` for the same pen position, so a cursor that lands left of
@@ -44,7 +51,8 @@ from . import adapt, areafit
 from .findings import hotspot_reason
 from .hotspots import place_id
 from .playobserve import MIN_MATCHED, MIN_REACH_POINTS
-from .playtypes import (HIT, IMPROVING, INSUFFICIENT, PLATEAU, START, WORSE, Convergence, PlayReport, RoundRecord)
+from .playtypes import (HIT, IMPROVING, INSUFFICIENT, OVER, PLATEAU, SHORT, START, WORSE, Convergence, PlayReport,
+                        RoundRecord)
 
 # ----------------------------------------------------------------- cost
 # Each component becomes badness v / (v + ref) in [0, 1): 0 perfect, ``ref`` = judged half-bad.
@@ -73,6 +81,21 @@ MIN_FAST, MIN_SLOW = 4, 5
 UNDO_MEMORY = 6
 LOCAL_MIN_N = 20               # objects inside the hotspots before they may move the area at all
 LOCAL_MAX_SHIFT_MM = 1.5       # a shift for local problems is never larger than this
+# ------------------------------------------------------------- area probes (trials)
+PROBE_MAX_SHIFT_MM = 1.5       # a trial shift is never larger than this (and kept trials never add up to more)
+PROBE_MAX_SCALE = 0.03         # ... nor a trial size change (3 %)
+PROBE_MIN_SHIFT_MM = 0.5       # smaller trials could not be told apart from the noise of one round
+PROBE_MIN_SCALE = 0.01
+PROBE_HINT_MM = 0.1            # point estimates below these are no hint at all: nothing is tried
+PROBE_HINT_SCALE = 0.003
+PROBE_EDGE_VOTE = 0.005        # each edge zone that falls short (-) / goes over (+) adds this to the size hint
+PROBE_ROUNDS_PER_FAMILY = 4    # trial rounds per family (shift, size) in one coach session
+# Order of attempts for one hint: its own direction, the opposite one, then both again at half the step.
+PROBE_ATTEMPTS = ((1, 1.0), (-1, 1.0), (1, 0.5), (-1, 0.5))
+_X_ZONES = frozenset(("left", "right", "top_left", "top_right", "bottom_left", "bottom_right"))
+_Y_ZONES = frozenset(("top", "bottom", "top_left", "top_right", "bottom_left", "bottom_right"))
+# Changes after which the trials start over from a fresh estimate (their budgets stay used).
+_PROBE_RESET_KINDS = ("shift", "scale", "filter", "revert", "manual", "smoothing")
 
 
 # ------------------------------------------------------------------- cost
@@ -156,6 +179,59 @@ def round_cost(report: PlayReport, prefs: UserPreferences | None = None, seed: i
 
 # ------------------------------------------------------------------ state
 @dataclass(frozen=True)
+class ProbeStep:
+    """One trial move of the area. ``family`` shift | size; ``axis`` x | y | both (player's view)."""
+    family: str
+    axis: str
+    sign: int                  # +1 = right / down / bigger, -1 = left / up / smaller
+    step: float                # mm for a shift, a fraction (0.02 = 2 %) for a size change
+
+    @property
+    def key(self) -> tuple[str, str, int, float]:
+        return self.family, self.axis, self.sign, round(self.step, 4)
+
+
+@dataclass(frozen=True)
+class ProbeState:
+    """Where the area trials stand (lives in ``OptimizerState.probe``; pure data).
+
+    ``queue`` holds the hints of the round where probing started, best first, as
+    ``(family, axis, preferred sign, step)``; ``None`` = not built yet. ``cursor``/``attempt`` point at the next
+    try (``PROBE_ATTEMPTS``). ``live`` is the trial on the tablet now, judged by the next round against round
+    ``base_index`` (played on ``base_area``). ``offset`` is what kept trials added up to per ``family.axis``.
+    """
+    queue: tuple[tuple[str, str, int, float], ...] | None = None
+    cursor: int = 0
+    attempt: int = 0
+    live: ProbeStep | None = None
+    base_index: int | None = None
+    base_area: Rect | None = None
+    tried: frozenset = frozenset()                          # keys never tried again (reverted / skipped / going back)
+    used: tuple[tuple[str, int], ...] = ()                  # trials applied per family (whole session)
+    offset: tuple[tuple[str, float], ...] = ()
+    outcome: str | None = None                              # "kept" | "reverted" | "unclear" for round outcome_round
+    outcome_round: int | None = None
+    judged: ProbeStep | None = None                         # the trial that outcome is about
+    kept: int = 0
+    reverted: int = 0
+
+
+def _get(pairs: tuple[tuple[str, Any], ...], key: str, default: Any) -> Any:
+    return next((v for k, v in pairs if k == key), default)
+
+
+def _put(pairs: tuple[tuple[str, Any], ...], key: str, value: Any) -> tuple[tuple[str, Any], ...]:
+    return tuple((k, v) for k, v in pairs if k != key) + ((key, value),)
+
+
+def _probe_reset(ps: ProbeState | None) -> ProbeState | None:
+    """Start the trials over from a fresh estimate later; the budgets stay used."""
+    if ps is None:
+        return None
+    return ProbeState(used=ps.used, kept=ps.kept, reverted=ps.reverted)
+
+
+@dataclass(frozen=True)
 class OptimizerState:
     rounds: tuple[RoundRecord, ...] = ()
     adapt: adapt.AdaptState = field(default_factory=adapt.AdaptState)
@@ -163,6 +239,7 @@ class OptimizerState:
     last_move: tuple[str, float, float] | None = None       # (kind, x, y) of the last applied movement
     undone: tuple[tuple[str, int, int], ...] = ()           # recent movements that made things worse
     best: int | None = None                                  # index of the best accepted round
+    probe: ProbeState | None = None                          # area trials (see ProbeState)
 
 
 def new_state() -> OptimizerState:
@@ -185,13 +262,16 @@ def accepted_rounds(state: OptimizerState) -> list[RoundRecord]:
 
 def record_round(state: OptimizerState, report: PlayReport, area: Rect, filters: tuple[FilterConfig, ...] = (),
                  *, change: Sequence[Reason] = (), kind: str = "start", move: tuple[float, float] = (0.0, 0.0),
-                 new_adapt: adapt.AdaptState | None = None, prefs: UserPreferences | None = None
-                 ) -> tuple[OptimizerState, PlayReport]:
+                 new_adapt: adapt.AdaptState | None = None, prefs: UserPreferences | None = None,
+                 new_probe: ProbeState | None = None) -> tuple[OptimizerState, PlayReport]:
     """Score a played round and add it. Returns the new state and the report with ``cost``/``cost_ci`` filled.
 
     ``change`` / ``kind`` / ``move`` describe what was applied BEFORE this round (a proposal's
-    ``reasons``, ``kind`` and ``move``). A round whose cost is worse than the previous accepted one by more
-    than the noise halves the trust region and remembers the movement so it is not repeated.
+    ``reasons``, ``kind`` and ``move``; ``new_adapt`` / ``new_probe`` its states). A round whose cost is worse
+    than the previous accepted one by more than the noise halves the trust region and remembers the movement
+    so it is not repeated. A round played on an area trial (``kind="probe"``) judges that trial: kept when the
+    cost improved beyond the noise against the round before it, otherwise marked to be put back.
+    ``kind`` may also be ``manual`` / ``smoothing`` (the player changed something by hand): not attributed.
     """
     cost, ci = round_cost(report, prefs, seed=len(state.rounds))
     accepted = cost is not None and report.alignment.matched >= MIN_MATCHED
@@ -215,9 +295,46 @@ def record_round(state: OptimizerState, report: PlayReport, area: Rect, filters:
     best = state.best
     if accepted and (best is None or rec.cost < rounds[best].cost):
         best = rec.index
+    probe = new_probe if new_probe is not None else state.probe
+    if kind == "probe" and probe is not None and probe.live is not None:
+        if accepted:
+            probe = _judge(probe, rec, state.rounds)
+    elif kind in _PROBE_RESET_KINDS:
+        probe = _probe_reset(probe)
     new = replace(state, rounds=rounds, trust=trust, undone=undone, last_move=last_move, best=best,
-                  adapt=new_adapt if new_adapt is not None else state.adapt)
+                  adapt=new_adapt if new_adapt is not None else state.adapt, probe=probe)
     return new, replace(report, cost=cost, cost_ci=ci)
+
+
+def _judge(ps: ProbeState, rec: RoundRecord, before: Sequence[RoundRecord]) -> ProbeState:
+    """The round ``rec`` was played on the live trial: keep it or mark it to be put back."""
+    live = ps.live
+    assert live is not None
+    base = before[ps.base_index] if ps.base_index is not None and ps.base_index < len(before) else None
+    if base is None or base.cost is None or rec.cost is None:
+        # nothing to compare with: the trial stays, and this round becomes the new reference
+        return replace(ps, live=None, outcome="unclear", outcome_round=rec.index, judged=live,
+                       base_index=rec.index, base_area=rec.area)
+    if _gain(base, rec) > _threshold(base, rec):
+        name = f"{live.family}.{live.axis}"
+        back = ProbeStep(live.family, live.axis, -live.sign, live.step).key     # never straight back
+        return replace(ps, live=None, outcome="kept", outcome_round=rec.index, judged=live, kept=ps.kept + 1,
+                       offset=_put(ps.offset, name, _add_offset(live.family, _get(ps.offset, name, 0.0), live)),
+                       tried=ps.tried | {back}, base_index=rec.index, base_area=rec.area)
+    return replace(ps, live=None, outcome="reverted", outcome_round=rec.index, judged=live,
+                   reverted=ps.reverted + 1, tried=ps.tried | {live.key}, attempt=ps.attempt + 1)
+
+
+def skip_probe(state: OptimizerState, ps: ProbeState | None, back_only: bool = False) -> OptimizerState:
+    """The player skipped (or undid) a trial: it is never tried again. ``back_only``: they refused to put a
+    trial back, so the trials start over from the area as it is."""
+    if ps is None:
+        return state
+    if back_only:
+        return replace(state, probe=_probe_reset(ps))
+    tried = ps.tried | {ps.live.key} if ps.live is not None else ps.tried
+    attempt = ps.attempt + 1 if ps.live is not None else ps.attempt
+    return replace(state, probe=replace(ps, live=None, tried=tried, attempt=attempt, outcome=None))
 
 
 def mark_undone(state: OptimizerState, kind: str, move: tuple[float, float]) -> OptimizerState:
@@ -255,17 +372,26 @@ def convergence(state: OptimizerState) -> Convergence:
 # ---------------------------------------------------------------- proposal
 @dataclass(frozen=True)
 class RoundProposal:
-    """What to do next. ``kind`` is shift | scale | filter | revert | none."""
+    """What to do next. ``kind`` is shift | scale | filter | revert | probe | probe_back | none.
+
+    ``probe`` is an area trial (``new_probe`` carries the trial state to hand back to ``record_round``);
+    ``probe_back`` puts a trial that did not help back. ``probe_outcome`` says, in words, what happened to the
+    trial the last round was played on (kept / put back). ``undo_area``: a probe that also puts the previous
+    trial back; skipping it should still put that area back.
+    """
     kind: str
     verdict: str
     message: Reason | None = None
     reasons: tuple[Reason, ...] = ()
     area: Rect | None = None
     filters: tuple[FilterConfig, ...] | None = None
-    move: tuple[float, float] = (0.0, 0.0)       # shift: view mm; scale: relative change per axis
+    move: tuple[float, float] = (0.0, 0.0)       # shift/probe shift: view mm; scale/probe size: relative change
     new_adapt: adapt.AdaptState | None = None
     revert_to: int | None = None
     lock_aspect_note: bool = False
+    new_probe: ProbeState | None = None
+    probe_outcome: Reason | None = None
+    undo_area: Rect | None = None
 
     @property
     def changes(self) -> ProfileChanges | None:
@@ -409,6 +535,163 @@ def _filter(state: OptimizerState, profile: ProfileInfo, report: PlayReport, tab
                          move=(1.0 if shaky else -1.0, 0.0), new_adapt=result.state)
 
 
+# ------------------------------------------------------------- area probes
+def probe_hints(report: PlayReport, aspect_lock: bool = True) -> list[tuple[str, str, float]]:
+    """Point estimates of what the area may need, as ``(family, axis, signed amount)``, strongest first.
+
+    Shift (mm, player's view): the reach bias. Size (fraction): ``gain - 1`` per axis plus
+    ``PROBE_EDGE_VOTE`` per edge zone that falls short (-) or goes over (+); with the aspect locked one
+    ``both`` hint (the mean). Nothing here needs to be significant: these only pick the direction of a trial.
+    Small-zone problems (hotspots) are not used: the local rule already says "practise that zone" for them.
+    """
+    ex = ey = sx = sy = 0.0
+    reach = report.reach
+    if reach is not None and reach.n >= MIN_REACH_POINTS:
+        ex, ey = reach.bias_x_mm, reach.bias_y_mm
+        sx, sy = reach.gain_x - 1.0, reach.gain_y - 1.0
+    for edge in report.edges:
+        if edge.kind not in (SHORT, OVER):
+            continue
+        vote = PROBE_EDGE_VOTE if edge.kind == OVER else -PROBE_EDGE_VOTE
+        sx += vote if edge.zone in _X_ZONES else 0.0
+        sy += vote if edge.zone in _Y_ZONES else 0.0
+    hints = [("shift", "x", ex), ("shift", "y", ey)]
+    hints += [("size", "both", (sx + sy) / 2.0)] if aspect_lock else [("size", "x", sx), ("size", "y", sy)]
+    out = []
+    for family, axis, amount in hints:
+        floor, cap = (PROBE_HINT_MM, PROBE_MAX_SHIFT_MM) if family == "shift" else (PROBE_HINT_SCALE, PROBE_MAX_SCALE)
+        if math.isfinite(amount) and abs(amount) >= floor:
+            out.append((abs(amount) / cap, family, axis, amount))
+    out.sort(key=lambda h: -h[0])
+    return [(family, axis, amount) for _, family, axis, amount in out]
+
+
+def _round_step(family: str, value: float, down: bool = False) -> float:
+    """Trial steps on a readable grid: 0.1 mm, 0.5 %."""
+    unit = 0.1 if family == "shift" else 0.005
+    n = math.floor(value / unit + 1e-9) if down else round(value / unit)
+    return round(n * unit, 4)
+
+
+def _probe_queue(report: PlayReport, aspect_lock: bool, trust: float) -> tuple[tuple[str, str, int, float], ...]:
+    out = []
+    for family, axis, amount in probe_hints(report, aspect_lock):
+        lo, hi = (PROBE_MIN_SHIFT_MM, PROBE_MAX_SHIFT_MM) if family == "shift" else (PROBE_MIN_SCALE, PROBE_MAX_SCALE)
+        step = _round_step(family, max(lo, min(abs(amount), hi) * trust))
+        out.append((family, axis, 1 if amount > 0 else -1, step))
+    return tuple(out)
+
+
+def _room(family: str, sign: int, offset: float) -> float:
+    """How far one more trial may go this way so that the kept ones stay within one cap of where probing began.
+
+    Shifts add up (mm); sizes multiply (``offset`` is the kept relative change, e.g. 0.02 = 2 % bigger)."""
+    if family == "shift":
+        return PROBE_MAX_SHIFT_MM - sign * offset
+    factor = 1.0 + offset
+    return (1.0 + PROBE_MAX_SCALE) / factor - 1.0 if sign > 0 else 1.0 - (1.0 - PROBE_MAX_SCALE) / factor
+
+
+def _add_offset(family: str, offset: float, step: ProbeStep) -> float:
+    if family == "shift":
+        return offset + step.sign * step.step
+    return (1.0 + offset) * (1.0 + step.sign * step.step) - 1.0
+
+
+def _probe_area(area: Rect, step: ProbeStep, tablet: TabletSpec | None) -> tuple[Rect, tuple[Reason, ...]]:
+    delta = step.sign * step.step
+    if step.family == "shift":
+        dx, dy = (delta, 0.0) if step.axis == "x" else (0.0, delta)
+        return areafit.shift_area(area, dx, dy, tablet)
+    f = 1.0 + delta
+    fx, fy = {"both": (f, f), "x": (f, 1.0), "y": (1.0, f)}[step.axis]
+    return areafit.scale_area_axes(area, fx, fy, tablet, lock_aspect=step.axis == "both")
+
+
+def probe_what(step: ProbeStep, mm: float | None = None) -> Reason:
+    """The trial in words: "mover el área 1,2 mm a la derecha", "hacer el área un 2 % más pequeña"."""
+    if step.family == "shift":
+        way = {("x", 1): "right", ("x", -1): "left", ("y", 1): "down", ("y", -1): "up"}[(step.axis, step.sign)]
+        return Reason("play.probe.what.shift", {"mm": float(mm if mm is not None else step.step), "way": way})
+    way = {("both", 1): "bigger", ("both", -1): "smaller", ("x", 1): "wider", ("x", -1): "narrower",
+           ("y", 1): "taller", ("y", -1): "shorter"}[(step.axis, step.sign)]
+    return Reason("play.probe.what.size", {"pct": float(round(step.step * 100.0, 1)), "way": way})
+
+
+def _next_probe(ps: ProbeState, base_area: Rect, base_index: int, tablet: TabletSpec | None,
+                aspect_lock: bool) -> RoundProposal | None:
+    """The next trial from ``base_area``, or None when the hints or the budgets are used up."""
+    queue = ps.queue or ()
+    cursor, attempt, tried = ps.cursor, ps.attempt, set(ps.tried)
+    while cursor < len(queue):
+        family, axis, preferred, step0 = queue[cursor]
+        if attempt >= len(PROBE_ATTEMPTS) or _get(ps.used, family, 0) >= PROBE_ROUNDS_PER_FAMILY \
+                or (aspect_lock and family == "size" and axis != "both"):
+            cursor, attempt = cursor + 1, 0
+            continue
+        flip, level = PROBE_ATTEMPTS[attempt]
+        sign = preferred * flip
+        lo, hi = (PROBE_MIN_SHIFT_MM, PROBE_MAX_SHIFT_MM) if family == "shift" else (PROBE_MIN_SCALE, PROBE_MAX_SCALE)
+        size = _round_step(family, max(lo, step0 * level))
+        room = _room(family, sign, _get(ps.offset, f"{family}.{axis}", 0.0))   # kept trials never add up past one cap
+        if size > room + 1e-9:
+            size = _round_step(family, room, down=True)
+        step = ProbeStep(family, axis, sign, size)
+        if size < lo - 1e-9 or step.key in tried:
+            attempt += 1
+            continue
+        area, reasons = _probe_area(base_area, step, tablet)
+        if area == base_area:                     # no room on the tablet that way
+            tried.add(step.key)
+            attempt += 1
+            continue
+        if family == "shift":
+            move = areafit.tablet_to_view(area.x - base_area.x, area.y - base_area.y, area.rotation)
+            what = probe_what(step, abs(move[0] if axis == "x" else move[1]))
+        else:
+            move = (area.width / base_area.width - 1.0, area.height / base_area.height - 1.0)
+            what = probe_what(step)
+        new = replace(ps, cursor=cursor, attempt=attempt, live=step, base_index=base_index, base_area=base_area,
+                      tried=frozenset(tried), used=_put(ps.used, family, _get(ps.used, family, 0) + 1),
+                      outcome=None, outcome_round=None, judged=None)
+        lead = (Reason("play.probe.try", {"what": what}), Reason("play.probe.why"))
+        notes = tuple(r for r in reasons if r.key not in ("play.area.shift", "play.area.scale"))
+        return RoundProposal("probe", IMPROVING, Reason("play.msg.probe"), lead + notes, area=area, move=move,
+                             new_probe=new)
+    return None
+
+
+def _probe_stage(state: OptimizerState, profile: ProfileInfo, report: PlayReport, tablet: TabletSpec | None,
+                 aspect_lock: bool) -> RoundProposal | None:
+    """No stage had evidence: try a small trial move of the area (see the module docstring)."""
+    ps = state.probe or ProbeState()
+    if ps.queue is None:
+        ps = replace(ps, queue=_probe_queue(report, aspect_lock, state.trust), cursor=0, attempt=0,
+                     tried=frozenset(), offset=())
+    return _next_probe(ps, profile.tablet_area, state.rounds[-1].index, tablet, aspect_lock)
+
+
+def _probe_outcome(ps: ProbeState) -> Reason | None:
+    if ps.judged is None or ps.outcome is None:
+        return None
+    return Reason(f"play.probe.{ps.outcome}", {"what": probe_what(ps.judged)})
+
+
+def _after_failed_probe(state: OptimizerState, ps: ProbeState, verdict: str, tablet: TabletSpec | None,
+                        aspect_lock: bool) -> RoundProposal:
+    """The trial did not help: put it back, and in the same step try the next one (unless it is time to stop)."""
+    outcome = _probe_outcome(ps)
+    assert ps.base_area is not None and ps.base_index is not None
+    if verdict != PLATEAU:
+        nxt = _next_probe(ps, ps.base_area, ps.base_index, tablet, aspect_lock)
+        if nxt is not None:
+            return replace(nxt, reasons=nxt.reasons[:1] + (Reason("play.probe.from_base"),) + nxt.reasons[1:],
+                           probe_outcome=outcome, undo_area=ps.base_area)
+    done = replace(ps, queue=(), outcome=None)
+    return RoundProposal("probe_back", verdict if verdict != START else IMPROVING, Reason("play.msg.probe_back"),
+                         (Reason("play.probe.back"),), area=ps.base_area, new_probe=done, probe_outcome=outcome)
+
+
 def propose(state: OptimizerState, profile: ProfileInfo, report: PlayReport, tablet: TabletSpec | None = None,
             policy: adapt.TuningPolicy | None = None, aspect_lock: bool = True, allow_filters: bool = True,
             catalog: Mapping[str, FilterSpec] | None = None) -> RoundProposal:
@@ -421,7 +704,21 @@ def propose(state: OptimizerState, profile: ProfileInfo, report: PlayReport, tab
         return _none(INSUFFICIENT, Reason("play.msg.play_more"), report.warnings)
     verdict = convergence(state)
     last = state.rounds[-1]
-    if state.best is not None and state.best != last.index and last.kind != "revert":
+    ps = state.probe
+    outcome = None
+    if ps is not None and ps.outcome_round == last.index:     # this round was played on an area trial
+        if ps.outcome == "reverted":
+            return _after_failed_probe(state, ps, verdict.verdict, tablet, aspect_lock)
+        outcome = _probe_outcome(ps)
+    proposal = _propose(state, profile, report, tablet, policy, aspect_lock, allow_filters, catalog, verdict)
+    return replace(proposal, probe_outcome=outcome) if outcome is not None else proposal
+
+
+def _propose(state: OptimizerState, profile: ProfileInfo, report: PlayReport, tablet: TabletSpec | None,
+             policy: adapt.TuningPolicy | None, aspect_lock: bool, allow_filters: bool,
+             catalog: Mapping[str, FilterSpec] | None, verdict: Convergence) -> RoundProposal:
+    last = state.rounds[-1]
+    if state.best is not None and state.best != last.index and last.kind not in ("revert", "probe_back"):
         best = state.rounds[state.best]
         if last.cost > best.cost + max(_noise(last), _noise(best), MIN_ABSOLUTE_WORSE):
             return RoundProposal("revert", WORSE, Reason("play.msg.revert"),
@@ -433,7 +730,8 @@ def propose(state: OptimizerState, profile: ProfileInfo, report: PlayReport, tab
     for make in (lambda: _shift(state, profile, report, tablet),
                  lambda: _scale(state, profile, report, tablet, aspect_lock),
                  lambda: _local(state, profile, report, tablet),
-                 lambda: _filter(state, profile, report, tablet, policy, catalog) if allow_filters else None):
+                 lambda: _filter(state, profile, report, tablet, policy, catalog) if allow_filters else None,
+                 lambda: None if report.hotspots else _probe_stage(state, profile, report, tablet, aspect_lock)):
         proposal = make()
         if proposal is not None:
             return replace(proposal, verdict=verdict.verdict if verdict.verdict != START else IMPROVING)

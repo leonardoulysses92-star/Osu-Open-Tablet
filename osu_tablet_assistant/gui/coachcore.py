@@ -12,14 +12,17 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
-from ..engine import adapt, findings as findings_mod, optimizer as opt, replay as replay_mod
+from ..engine import adapt, areafit, findings as findings_mod, optimizer as opt, replay as replay_mod
+from ..engine import smoothing
 from ..engine.beatmap import BeatmapIndex, find_beatmap, load_beatmap, parse_window_title
 from ..engine.playobserve import ALIGN_TRUST, analyze_play
 from ..engine.playtypes import DEFAULT_DETAIL, Beatmap, Convergence, PlayCapture, PlayReport, grid_for
 from ..keys import DEFAULT_CLICK_KEYS, PEN_TIP_KEY, display_list, normalize_keys
 from ..knowledge.filters import FilterSpec, load_catalog
-from ..models import DisplaySpec, Reason, Rect, TabletSpec, UserPreferences
+from ..models import DisplaySpec, FilterConfig, ProfileChanges, Reason, Rect, TabletSpec, UserPreferences
+from ..otd import settings_io
 from ..otd.livetune import LiveTuner, OsuWatcher
+from ..otd.plugins import KNOWN_PLUGINS
 from .i18n import t as default_t
 from .pen_sampler import PenSampler
 from .playwatch import LiveView, PlayRecorder, osu_window_title, songs_dir_for, windows_key_source
@@ -33,6 +36,60 @@ PHASES = ("prepare", "observe", "report")
 Translate = Callable[..., str]
 # Everything the coach and its helpers collect, nothing more (each id has a ``play.data.<id>`` text).
 DATA_LEDGER = ("cursor", "keys", "window", "map", "replay", "profile", "never")
+# Adjusting the area by hand ("Ajustar el área a mano"): one press = this much, in the player's view.
+MANUAL_SIZE_STEP = 0.02         # 2 % bigger / smaller
+MANUAL_MOVE_MM = 0.5
+MANUAL_MOVES = {"left": (-1.0, 0.0), "right": (1.0, 0.0), "up": (0.0, -1.0), "down": (0.0, 1.0)}
+MANUAL_SIZES = {"smaller": (-1, -1), "bigger": (1, 1), "narrower": (-1, 0), "wider": (1, 0),
+                "shorter": (0, -1), "taller": (0, 1)}
+FREE_ONLY = ("narrower", "wider", "shorter", "taller")       # one axis only: needs the free proportion
+# Reasons whose float parameters are numbers to show with the language's decimal mark.
+_LOCAL_NUMBERS = ("play.probe.", "play.smooth.", "play.manual.")
+
+
+def fmt_num(value: float, translate: Translate = default_t, decimals: int = 1) -> str:
+    """``76.571`` -> "76,6" in Spanish, "76.6" in English (trailing zeros dropped: 80.0 -> "80")."""
+    text = f"{float(value):.{decimals}f}"
+    if "." in text:
+        text = text.rstrip("0").rstrip(".")
+    if text in ("", "-0"):
+        text = "0"
+    mark = translate("play.fmt.decimal")
+    return text.replace(".", mark if len(mark) == 1 else ".")
+
+
+def area_summary(area: Rect, translate: Translate = default_t, key: str = "play.area.now") -> str:
+    """"Área actual: 80 × 45 mm, centro 76,6 / 45,2 mm, girada 180°" (OTD's own Width/Height/X/Y numbers).
+
+    ``key="play.area.after"`` says the same of a proposed area ("Con el cambio propuesto: ...").
+    """
+    text = translate(key, w=fmt_num(area.width, translate), h=fmt_num(area.height, translate),
+                     x=fmt_num(area.x, translate), y=fmt_num(area.y, translate))
+    rotation = area.rotation % 360.0
+    if min(rotation, 360.0 - rotation) > 1e-6:
+        text += translate("play.area.rotated", rotation=fmt_num(rotation, translate, 0))
+    return text
+
+
+def area_changes(before: Rect, after: Rect, translate: Translate = default_t) -> list[str]:
+    """"antes → ahora" for width, height and position; empty while nothing changed."""
+    def same(a: float, b: float) -> bool:
+        return abs(a - b) < 5e-4
+
+    if all(same(a, b) for a, b in ((before.width, after.width), (before.height, after.height),
+                                    (before.x, after.x), (before.y, after.y))):
+        return []
+    n = lambda v: fmt_num(v, translate)       # noqa: E731
+    lines = []
+    for name, old, new in (("width", before.width, after.width), ("height", before.height, after.height)):
+        lines.append(translate(f"play.area.same.{name}", value=n(new)) if same(old, new)
+                     else translate(f"play.area.change.{name}", old=n(old), new=n(new)))
+    if same(before.x, after.x) and same(before.y, after.y):
+        lines.append(translate("play.area.same.center", value=f"{n(after.x)} / {n(after.y)}"))
+    else:
+        lines.append(translate("play.area.change.center", old=f"{n(before.x)} / {n(before.y)}",
+                               new=f"{n(after.x)} / {n(after.y)}"))
+    return lines
 
 
 def ledger_text(translate: Translate = default_t, keys: Sequence[str] = DEFAULT_CLICK_KEYS) -> str:
@@ -52,8 +109,15 @@ def place_text(place: str, translate: Translate = default_t) -> str:
 
 
 def say(reason: Reason, translate: Translate = default_t) -> str:
-    """Translate a Reason; zone, place, size and direction parameters become words, adapt's axis/strength too."""
-    params = dict(reason.params)
+    """Translate a Reason; zone, place, size and direction parameters become words, adapt's axis/strength too.
+
+    A parameter that is itself a Reason is translated first (e.g. "the trial" inside "the trial helped").
+    """
+    params = {k: say(v, translate) if isinstance(v, Reason) else v for k, v in reason.params.items()}
+    if reason.key.startswith(_LOCAL_NUMBERS):
+        params = {k: fmt_num(v, translate) if isinstance(v, float) else v for k, v in params.items()}
+    if "way" in params:
+        params["way"] = translate(f"play.probe.way.{params['way']}")
     if "zone" in params:
         params["zone"] = translate(f"play.zone.{params['zone']}")
     if "place" in params:
@@ -142,6 +206,40 @@ class _Pending:
     move: tuple[float, float]
     change: tuple[Reason, ...]
     adapt: adapt.AdaptState | None
+    probe: opt.ProbeState | None = None
+
+
+@dataclass
+class SmoothTrial:
+    """A smoothing filter the player switched on to try (live, not saved)."""
+    path: str
+    previous: FilterConfig | None        # the store before the trial (None: it was not in the profile)
+    base_round: int | None               # last accepted round played without it (what it is compared with)
+    result_round: int | None = None      # first accepted round played with it
+    decided: bool = False                # the player chose "Keep it"
+
+
+@dataclass(frozen=True)
+class SmoothOption:
+    """One row of the smoothing card."""
+    path: str
+    name: str
+    text_id: str                         # play.smooth.what.<id> / play.smooth.feel.<id>
+    installed: bool
+    on: bool                             # running in OTD right now
+    was_on: bool                         # was already on when the coach opened (not a trial)
+    trying: bool                         # switched on here, to try
+    decided: bool
+    delay_ms: float | None               # estimated extra delay with the values it runs (or would run) with
+
+
+@dataclass(frozen=True)
+class SmoothVerdict:
+    """"With the smoothing: better / same / worse / unclear" for one trial, after a round played with it."""
+    path: str
+    name: str
+    verdict: str                         # better | same | worse | unclear
+    no_base: bool = False                # unclear because no round was played without it
 
 
 class CoachCore:
@@ -180,6 +278,17 @@ class CoachCore:
         self._kept_once = False
         self.skipped = 0
         self._round_maps: list[str] = []     # map file of every finished round (to tell when it changed)
+        original = self._original_profile()
+        self.original_area: Rect = original.tablet_area
+        self._original_filters: tuple[FilterConfig, ...] = original.filters
+        self.trials: dict[str, SmoothTrial] = {}
+        self._touched: set[str] = set()       # smoothing filters the player switched on or off here
+
+    def _original_profile(self):
+        for prof in settings_io.list_profiles(self.tuner.original):
+            if prof.tablet_name == self.tuner.tablet_name:
+                return prof
+        return self.tuner.profile()
 
     # --------------------------------------------------------------- prepare
     def _default_recorder(self, area: Rect) -> PlayRecorder:
@@ -377,7 +486,11 @@ class CoachCore:
             self.state, report, profile.tablet_area, profile.filters,
             change=pending.change if pending else (), kind=pending.kind if pending else "start",
             move=pending.move if pending else (0.0, 0.0), new_adapt=pending.adapt if pending else None,
-            prefs=self.prefs)
+            prefs=self.prefs, new_probe=pending.probe if pending else None)
+        record = self.state.rounds[-1]
+        if pending is not None and not record.accepted:
+            self._pending = pending           # nothing could be measured: the next round still tells its effect
+        self._note_smoothing_round(record, profile.filters)
         proposal = opt.propose(self.state, profile, report, self.tablet, self.policy, self.aspect_lock,
                                self.allow_filters, self.catalog)
         convergence = opt.convergence(self.state)
@@ -460,29 +573,55 @@ class CoachCore:
         changes = proposal.changes if proposal else None
         if proposal is None or changes is None:
             return CoachFeedback(False, message=Reason("play.msg.nothing_to_apply"), sound="error")
+        if changes.filters is not None and self._touched:
+            changes = replace(changes, filters=self._keep_user_smoothing(changes.filters))
         if not self.aspect_lock and changes.tablet_area is not None and changes.lock_aspect_ratio is None:
             changes = replace(changes, lock_aspect_ratio=False)    # OTD must not snap the area back to the screen's ratio
+        fb = self._send(changes)
+        if not fb.ok:
+            return fb
+        # A change by hand since the report (e.g. smoothing taken out there) means the next round cannot be
+        # attributed to this proposal alone.
+        hand = self._pending.kind if self._pending is not None and self._pending.kind in ("manual", "smoothing") \
+            else None
+        self._pending = _Pending(hand or proposal.kind, proposal.move, proposal.reasons, proposal.new_adapt,
+                                 None if hand else proposal.new_probe)
+        self._last_applied = (proposal.kind, proposal.move)
+        self.result = None
+        self.phase = "prepare"
+        return CoachFeedback(True, proposal.reasons, Reason("play.msg.applied"), "keep", live_only=True)
+
+    def _send(self, changes: ProfileChanges) -> CoachFeedback:
+        """One live change through the LiveTuner (bounded, undoable, the first one makes the backup)."""
         outcome = self.tuner.propose(changes)
         if not outcome.accepted:
             return CoachFeedback(False, outcome.reasons, Reason("play.msg.rejected"), "error")
         sent = outcome.sent
         if sent is not None and not sent.ok:
             return CoachFeedback(False, (Reason("play.msg.send_failed"),), Reason("play.msg.send_failed"), "error")
-        self._pending = _Pending(proposal.kind, proposal.move, proposal.reasons, proposal.new_adapt)
-        self._last_applied = (proposal.kind, proposal.move)
-        self.result = None
-        self.phase = "prepare"
-        return CoachFeedback(True, proposal.reasons, Reason("play.msg.applied"), "keep", live_only=True)
+        return CoachFeedback(True, outcome.reasons, Reason("play.msg.applied"), "keep", live_only=True)
 
-    def skip_proposal(self) -> None:
-        """Do not apply this change; remember it so it is not proposed again straight away."""
+    def skip_proposal(self) -> CoachFeedback | None:
+        """Do not apply this change; remember it so it is not proposed again straight away.
+
+        Skipping a trial that would also put the previous trial back still puts that area back (a trial that
+        did not help is never left on the tablet by skipping); the feedback then says so.
+        """
         proposal = self.result.proposal if self.result else None
+        feedback = None
         if proposal is not None and proposal.kind in ("shift", "scale", "filter"):
             self.state = opt.mark_undone(self.state, proposal.kind, proposal.move)
+        elif proposal is not None and proposal.kind in ("probe", "probe_back"):
+            self.state = opt.skip_probe(self.state, proposal.new_probe, back_only=proposal.kind == "probe_back")
+            if proposal.undo_area is not None and proposal.undo_area != self.area:
+                fb = self._send(self._area_changes(proposal.undo_area))
+                if fb.ok:
+                    feedback = CoachFeedback(True, (), Reason("play.probe.skip_back"), "undo", live_only=True)
         self.skipped += 1
         self._pending = None
         self.result = None
         self.phase = "prepare"
+        return feedback
 
     def undo_last(self) -> CoachFeedback:
         """Take back the last applied change (and do not propose it again)."""
@@ -491,15 +630,193 @@ class CoachCore:
             return CoachFeedback(False, outcome.reasons, Reason("play.msg.nothing_to_undo"), "error")
         if self._last_applied is not None:
             self.state = opt.mark_undone(self.state, *self._last_applied)
+        if self._pending is not None and self._pending.kind == "probe":
+            self.state = opt.skip_probe(self.state, self._pending.probe)
         self._pending, self._last_applied = None, None
+        self._sync_trials()
         return CoachFeedback(True, outcome.reasons, Reason("play.msg.undone"), "undo", live_only=True)
 
     def restore_original(self) -> CoachFeedback:
         """Back to the settings the coach started with; the rounds start over."""
         outcome = self.tuner.revert_all()
         self.state, self._pending, self._last_applied, self.result = opt.new_state(), None, None, None
+        self.trials.clear()
+        self._touched.clear()
         self.phase = "prepare"
         return CoachFeedback(outcome.accepted, outcome.reasons, Reason("play.msg.restored"), "undo", live_only=True)
+
+    # ------------------------------------------------------- changes by hand
+    def _area_changes(self, area: Rect) -> ProfileChanges:
+        return ProfileChanges(tablet_area=area, lock_aspect_ratio=None if self.aspect_lock else False)
+
+    def _hand_change(self, kind: str) -> None:
+        """The player changed something themselves: the next round is not attributed to a proposal."""
+        pending = self._pending
+        self._pending = _Pending(kind, (0.0, 0.0), (), pending.adapt if pending else None)
+        self._last_applied = None
+
+    def manual_area(self, action: str) -> CoachFeedback:
+        """One press of "Ajustar el área a mano", in the player's view (left = left of the screen, any rotation).
+
+        ``left/right/up/down`` move it ``MANUAL_MOVE_MM``; ``smaller/bigger`` scale it ``MANUAL_SIZE_STEP``
+        keeping its proportion; ``narrower/wider/shorter/taller`` change one axis only (free proportion only).
+        Live and undoable like every change, bounded to the tablet, not saved until Keep.
+        """
+        if self.phase == "observe" or (action not in MANUAL_MOVES and action not in MANUAL_SIZES):
+            return CoachFeedback(False, message=Reason("play.manual.not_now"), sound="error")
+        if action in FREE_ONLY and self.aspect_lock:
+            return CoachFeedback(False, message=Reason("play.manual.needs_free"), sound="error")
+        area = self.area
+        if action in MANUAL_MOVES:
+            ux, uy = MANUAL_MOVES[action]
+            new, reasons = areafit.shift_area(area, ux * MANUAL_MOVE_MM, uy * MANUAL_MOVE_MM, self.tablet)
+        else:
+            gx, gy = MANUAL_SIZES[action]
+            new, reasons = areafit.scale_area_axes(area, 1.0 + gx * MANUAL_SIZE_STEP, 1.0 + gy * MANUAL_SIZE_STEP,
+                                                   self.tablet, lock_aspect=action not in FREE_ONLY)
+        if new == area:
+            return CoachFeedback(False, tuple(reasons), Reason("play.manual.no_room"), "error")
+        fb = self._send(self._area_changes(new))
+        if not fb.ok:
+            return fb
+        self._hand_change("manual")
+        return CoachFeedback(True, tuple(reasons), Reason("play.manual.applied"), "keep", live_only=True)
+
+    # ------------------------------------------------------------- smoothing
+    def installed_filters(self) -> set[str]:
+        """Filter paths this OTD has: the session's plugin scan, the profile, and the other filters of the same
+        plugins (one plugin brings both Radial Follow variants, both Hawku filters...)."""
+        paths = set(self.policy.installed) | {fc.path for fc in self._original_filters} \
+            | {fc.path for fc in self.profile.filters}
+        for known in KNOWN_PLUGINS:
+            if paths & set(known.filters):
+                paths |= set(known.filters)
+        return paths
+
+    def _rate_and_scale(self) -> tuple[float, float]:
+        rate = self.tablet.max_report_rate_hz if self.tablet is not None and self.tablet.max_report_rate_hz > 0 \
+            else 133.0
+        return rate, self.area.width / max(self.display.width_px, 1)
+
+    def smoothing_options(self) -> list[SmoothOption]:
+        """The smoothing card: every offered catalog filter, installed ones first."""
+        live = self.profile.filters
+        installed = self.installed_filters()
+        rate, mm_per_px = self._rate_and_scale()
+        out = []
+        for path in smoothing.offered(self.catalog):
+            spec = self.catalog[path]
+            idx = smoothing.find(live, path)
+            fc = live[idx] if idx is not None else None
+            on = fc is not None and fc.enabled
+            orig_idx = smoothing.find(self._original_filters, path)
+            was_on = orig_idx is not None and self._original_filters[orig_idx].enabled and path not in self.trials
+            values = fc.settings if on else smoothing.start_settings(spec, fc.settings if fc else None)[0]
+            trial = self.trials.get(path)
+            out.append(SmoothOption(path, spec.display_name, smoothing.text_id(path), path in installed, on,
+                                    was_on, trial is not None, bool(trial and trial.decided),
+                                    smoothing.delay_ms(path, values, rate, mm_per_px)))
+        out.sort(key=lambda o: not o.installed)
+        return out
+
+    def try_smoothing(self, path: str) -> CoachFeedback:
+        """Switch an installed smoothing filter on to try it (gentle values; live, undoable, not saved)."""
+        spec = self.catalog.get(path)
+        if self.phase == "observe" or spec is None or path not in smoothing.offered(self.catalog):
+            return CoachFeedback(False, message=Reason("play.manual.not_now"), sound="error")
+        if path not in self.installed_filters():
+            return CoachFeedback(False, message=Reason("play.smooth.not_installed", {"name": spec.display_name}),
+                                 sound="error")
+        live = self.profile.filters
+        idx = smoothing.find(live, path)
+        if idx is not None and live[idx].enabled:
+            return CoachFeedback(False, message=Reason("play.smooth.already_on", {"name": spec.display_name}),
+                                 sound="error")
+        filters, previous, own = smoothing.enable(live, path, self.catalog)
+        fb = self._send(ProfileChanges(filters=filters))
+        if not fb.ok:
+            return fb
+        done = opt.accepted_rounds(self.state)
+        self.trials[path] = SmoothTrial(path, previous, done[-1].index if done else None)
+        self._touched.add(path)
+        self._hand_change("smoothing")
+        notes = (Reason("play.smooth.own_values"),) if own else ()
+        return CoachFeedback(True, notes, Reason("play.smooth.on", {"name": spec.display_name}), "keep",
+                             live_only=True)
+
+    def stop_smoothing(self, path: str) -> CoachFeedback:
+        """"Quitarlo": switch the trial off again, with the values it had before (or take it out of the chain)."""
+        trial = self.trials.get(path)
+        if self.phase == "observe" or trial is None:
+            return CoachFeedback(False, message=Reason("play.manual.not_now"), sound="error")
+        fb = self._send(ProfileChanges(filters=smoothing.disable(self.profile.filters, path, trial.previous)))
+        if not fb.ok:
+            return fb
+        del self.trials[path]
+        self._touched.add(path)
+        self._hand_change("smoothing")
+        name = self.catalog[path].display_name if path in self.catalog else path
+        return CoachFeedback(True, (), Reason("play.smooth.off", {"name": name}), "undo", live_only=True)
+
+    def keep_smoothing(self, path: str) -> CoachFeedback:
+        """"Dejarlo": the trial stays on; it is saved with the other settings by "Guardar estos ajustes"."""
+        trial = self.trials.get(path)
+        if trial is None:
+            return CoachFeedback(False, message=Reason("play.manual.not_now"), sound="error")
+        trial.decided = True
+        name = self.catalog[path].display_name if path in self.catalog else path
+        return CoachFeedback(True, (), Reason("play.smooth.kept", {"name": name}), "keep", live_only=True)
+
+    def smoothing_verdicts(self) -> list[SmoothVerdict]:
+        """For each undecided trial already played with: better / same / worse than without it (or unclear)."""
+        out = []
+        for trial in self.trials.values():
+            if trial.decided or trial.result_round is None:
+                continue
+            name = self.catalog[trial.path].display_name if trial.path in self.catalog else trial.path
+            rounds = self.state.rounds
+            base = rounds[trial.base_round] if trial.base_round is not None and trial.base_round < len(rounds) \
+                else None
+            res = rounds[trial.result_round] if trial.result_round < len(rounds) else None
+            if base is None or res is None or base.cost is None or res.cost is None:
+                out.append(SmoothVerdict(trial.path, name, "unclear", no_base=base is None))
+                continue
+            gain = (base.cost - res.cost) / base.cost if base.cost > 1e-9 else 0.0
+            limit = opt._threshold(base, res)
+            out.append(SmoothVerdict(trial.path, name, "better" if gain > limit else "worse" if gain < -limit
+                                     else "same"))
+        return out
+
+    def _note_smoothing_round(self, record, filters: Sequence[FilterConfig]) -> None:
+        """A round was played: the first accepted one with a trial switched on is what that trial is judged by."""
+        if not record.accepted:
+            return
+        on = {fc.path for fc in filters if fc.enabled}
+        for trial in self.trials.values():
+            if trial.result_round is None and not trial.decided and trial.path in on:
+                trial.result_round = record.index
+
+    def _sync_trials(self) -> None:
+        """After an undo: a trial whose filter is off again is over."""
+        on = {fc.path for fc in self.profile.filters if fc.enabled}
+        for path in [p for p in self.trials if p not in on]:
+            del self.trials[path]
+
+    def _keep_user_smoothing(self, filters: Sequence[FilterConfig]) -> tuple[FilterConfig, ...]:
+        """A proposal never switches smoothing the player decided on (on or off): those stores stay as they are
+        live now (e.g. "back to the best round" keeps the smoothing the player is trying)."""
+        out = list(filters)
+        live = self.profile.filters
+        for path in self._touched:
+            live_idx, idx = smoothing.find(live, path), smoothing.find(out, path)
+            if live_idx is None:
+                if idx is not None:
+                    del out[idx]
+            elif idx is None:
+                out = list(adapt.insert_in_chain(out, live[live_idx]))
+            else:
+                out[idx] = live[live_idx]
+        return tuple(out)
 
     def keep(self) -> CoachFeedback:
         """Write the live settings to settings.json (after the backup). Returns the outcome."""

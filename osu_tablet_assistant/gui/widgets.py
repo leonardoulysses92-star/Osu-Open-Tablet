@@ -990,18 +990,24 @@ class Expander(ttk.Frame):
     """A collapsible "details" section (technical text by default, or any ``content``)."""
 
     def __init__(self, parent: tk.Misc, title: str | None = None, height: int = 7,
-                 opened: bool = False) -> None:
+                 opened: bool = False, widgets: bool = False,
+                 on_toggle: Callable[[bool], None] | None = None) -> None:
+        """``widgets=True``: the section is an empty frame (``content``) to pack widgets into, not a text box.
+        ``on_toggle`` is told the new open state (e.g. to remember it across screen refreshes)."""
         super().__init__(parent, style=_surface_style(parent, "TFrame"))
         self._title = title or t("gui.details.title")
         self._open = opened
+        self._on_toggle = on_toggle
         self._button = button(self, self._title, self.toggle, kind="ghost", icon="chevron_right")
         self._button.pack(anchor="w")
-        self._box = ReadOnlyText(self, height=height)
+        self._box: ttk.Frame = frame(self) if widgets else ReadOnlyText(self, height=height)
+        self.content: ttk.Frame = self._box
         self._refresh()
 
     def set(self, content: str) -> None:
         """Replace the technical text."""
-        self._box.set(content)
+        if isinstance(self._box, ReadOnlyText):
+            self._box.set(content)
 
     @property
     def is_open(self) -> bool:
@@ -1012,6 +1018,8 @@ class Expander(ttk.Frame):
         """Open or close the section."""
         self._open = not self._open
         self._refresh()
+        if self._on_toggle is not None:
+            self._on_toggle(self._open)
 
     def _refresh(self) -> None:
         self._button.set_icon("chevron_down" if self._open else "chevron_right")
