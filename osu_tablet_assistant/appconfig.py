@@ -67,6 +67,7 @@ class AppConfig:
     click_keys: list[str] = field(default_factory=lambda: list(DEFAULT_CLICK_KEYS))
     pen_clicks: bool = False
     analysis_detail: str = DEFAULT_DETAIL      # normal (3x4) | fine (6x8) | very_fine (9x12)
+    free_aspect: bool = False                  # the coach may change the area's proportion (not only its size)
 
     @property
     def key_choice(self) -> KeyChoice:
@@ -106,6 +107,7 @@ def from_dict(data: Any) -> AppConfig:
         "click_keys": lambda v: isinstance(v, list) and len(v) <= 50 and all(isinstance(k, str) for k in v),
         "pen_clicks": lambda v: isinstance(v, bool),
         "analysis_detail": lambda v: v in ANALYSIS_DETAILS,
+        "free_aspect": lambda v: isinstance(v, bool),
     }
     for f in fields(AppConfig):
         if f.name in data and checks[f.name](data[f.name]):

@@ -51,7 +51,7 @@ class CoachWindowTests(unittest.TestCase):
             env = self.env = Env(self)
             win = self.window()
             self.assertEqual(env.core.phase, "prepare")
-            self.assertIn(i18n.t("play.prepare.start"), self.texts(win.body))
+            self.assertIn(i18n.t("play.prepare.start"), self.texts(win.root))
             win.start_observing()
             self.assertEqual(env.core.phase, "observe")
             win._tick_observe()
@@ -59,7 +59,7 @@ class CoachWindowTests(unittest.TestCase):
             win.stop_observing()
             win.root.update()
             self.assertEqual(env.core.phase, "report")
-            body = self.texts(win.body)
+            body = self.texts(win.root)
             self.assertIn(i18n.t("play.report.apply"), body)
             self.assertIn(i18n.t("play.report.skip"), body)
             win.apply()
@@ -73,7 +73,7 @@ class CoachWindowTests(unittest.TestCase):
         win.start_observing()
         win.stop_observing()
         win.root.update()
-        shown = self.texts(win.body)
+        shown = self.texts(win.root)
         self.assertNotIn("play.", shown)
 
     def test_start_is_disabled_until_a_map_is_known(self) -> None:
@@ -81,7 +81,7 @@ class CoachWindowTests(unittest.TestCase):
         win = self.window()
         win.start_observing()
         self.assertEqual(self.env.core.phase, "prepare")
-        self.assertIn(i18n.t("play.prepare.pick_map"), self.texts(win.body))
+        self.assertIn(i18n.t("play.prepare.pick_map"), self.texts(win.root))
 
     def test_replay_buttons_and_the_check_line(self) -> None:
         from pathlib import Path
@@ -89,23 +89,23 @@ class CoachWindowTests(unittest.TestCase):
         from test_coach import ReplayRoundTests
         helper = ReplayRoundTests()
         win = self.window()
-        self.assertIn(i18n.t("play.prepare.use_replay"), self.texts(win.body))
+        self.assertIn(i18n.t("play.prepare.use_replay"), self.texts(win.root))
         path = helper.osr(self.env)
         with mock.patch.object(self.coach.filedialog, "askopenfilename", return_value=str(path)):
             win.pick_replay("round")
         win.root.update()
         self.assertEqual(self.env.core.phase, "report")
-        self.assertIn(i18n.t("play.replay.used"), self.texts(win.body))
-        self.assertNotIn(i18n.t("play.report.verify_replay"), self.texts(win.body))
+        self.assertIn(i18n.t("play.replay.used"), self.texts(win.root))
+        self.assertNotIn(i18n.t("play.report.verify_replay"), self.texts(win.root))
         win.play_again()
         win.start_observing()
         win.stop_observing()
-        self.assertIn(i18n.t("play.report.verify_replay"), self.texts(win.body))
+        self.assertIn(i18n.t("play.report.verify_replay"), self.texts(win.root))
         with mock.patch.object(self.coach.filedialog, "askopenfilename", return_value=str(path)):
             win.pick_replay("verify")
         win.root.update()
-        self.assertIn("%", self.texts(win.body))
-        self.assertNotIn("play.replay", self.texts(win.body))
+        self.assertIn("%", self.texts(win.root))
+        self.assertNotIn("play.replay", self.texts(win.root))
         with mock.patch.object(self.coach.filedialog, "askopenfilename", return_value=""):
             win.pick_replay("round")                      # cancelling the dialog changes nothing
 
@@ -210,7 +210,44 @@ class ClickKeysCardTests(unittest.TestCase):
         self.assertEqual(self.chips(win), ["Z", "X", "A", ";", "Mouse 2"])  # the rebuilt card keeps them
         self.assertEqual(session.app_config.click_keys, ["z", "x", "a", "semicolon", "mouse2"])
         self.assertGreaterEqual(session.saves, 1)
-        self.assertIn("A, ;, Mouse 2", self.texts(win.body))         # the honest text names the chosen keys
+        self.assertIn("A, ;, Mouse 2", self.texts(win.root))         # the honest text names the chosen keys
+
+    def test_actions_live_in_a_bar_that_does_not_scroll_and_the_map_change_is_followed(self) -> None:
+        folder = self.env.dir / "osu!" / "Songs" / "2 Artist - Song"
+        folder.mkdir()
+        from test_coach import OSU_FILE
+        (folder / "Artist - Song (me) [Easy].osu").write_text(OSU_FILE.replace("Version:Hard", "Version:Easy"),
+                                                              encoding="utf-8")
+        win = self.window(FakeSession())
+        self.assertIn(i18n.t("play.prepare.start"), self.texts(win.footer))       # start is always in reach
+        self.assertNotIn(i18n.t("play.prepare.start"), self.texts(win.body))
+        self.assertIn("Artist - Song [Hard]", self.texts(win.body))
+        self.env.title = "osu!  - Artist - Song [Easy]"                          # osu! loads another map
+        win._last_map_poll = 0.0
+        win._tick_map()
+        win.root.update()
+        self.assertIn("Artist - Song [Easy]", self.texts(win.body))              # the screen follows it
+        self.assertIn(i18n.t("play.map.now", name="Artist - Song [Easy]"), self.texts(win.body))
+        win.start_observing()                                                    # a round starts on the NEW map
+        self.assertEqual(win.core.beatmap.version, "Easy")
+        self.env.title = "osu!  - Artist - Song [Hard]"
+        win._last_map_poll = 0.0
+        win._tick_map()                                                          # changed while observing
+        self.assertEqual(win.core.beatmap.version, "Hard")
+        self.assertIn(i18n.t("play.map.changed", name="Artist - Song [Hard]"), win._observe_var.get())
+
+    def test_free_proportion_switch_reaches_the_core_and_is_saved(self) -> None:
+        session = FakeSession()
+        win = self.window(session)
+        self.assertTrue(self.env.core.aspect_lock)                  # default: keep the screen's proportion
+        win._free_var.set(True)
+        win._aspect_changed()
+        self.assertFalse(self.env.core.aspect_lock)                 # the optimizer may now stretch one axis
+        self.assertTrue(session.app_config.free_aspect)
+        win._free_var.set(False)
+        win._aspect_changed()
+        self.assertTrue(self.env.core.aspect_lock)
+        self.assertIn(i18n.t("play.aspect.label"), self.texts(win.root))
 
     def test_closing_the_card_gives_back_its_height_and_the_window_size(self) -> None:
         win = self.window(FakeSession())
@@ -243,7 +280,7 @@ class ClickKeysCardTests(unittest.TestCase):
         win.root.update()
         self.assertEqual(self.env.core.keys, ("z", "x", "mouse1"))   # the pen tip counts only now
         self.assertIn("Mouse 1", self.chips(win))
-        self.assertIn(i18n.t("play.prep.pen_tip"), self.texts(win.body))
+        self.assertIn(i18n.t("play.prep.pen_tip"), self.texts(win.root))
         card = win.keys_card
         card.manual_var.set("z, banana")
         card.apply_manual()
@@ -272,11 +309,11 @@ class ClickKeysCardTests(unittest.TestCase):
         win.root.update()
         self.assertIsNot(win.keys_card, card)
         self.assertTrue(win.keys_card.is_open)                       # ... and the card is still open
-        self.assertNotIn("play.", self.texts(win.body))              # every text is translated
+        self.assertNotIn("play.", self.texts(win.root))              # every text is translated
         for lang in i18n.SUPPORTED:
             i18n.set_language(lang)
             win.show_phase("prepare")
-            self.assertNotIn("play.", self.texts(win.body))
+            self.assertNotIn("play.", self.texts(win.root))
 
     def test_analysis_detail_choice(self) -> None:
         session = FakeSession()

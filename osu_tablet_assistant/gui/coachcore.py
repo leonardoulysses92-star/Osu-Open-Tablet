@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import math
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
@@ -113,6 +113,7 @@ class RoundResult:
     check: replay_mod.InferenceCheck | None = None    # live inference vs the game's own replay, when one was given
     from_replay: bool = False
     hint: Reason | None = None              # e.g. "no click seen with Z, X: other buttons?" (offer the key card)
+    map_changed: bool = False               # this round was played on another map than the previous one
 
 
 @dataclass(frozen=True)
@@ -178,6 +179,7 @@ class CoachCore:
         self._last_applied: tuple[str, tuple[float, float]] | None = None
         self._kept_once = False
         self.skipped = 0
+        self._round_maps: list[str] = []     # map file of every finished round (to tell when it changed)
 
     # --------------------------------------------------------------- prepare
     def _default_recorder(self, area: Rect) -> PlayRecorder:
@@ -191,6 +193,14 @@ class CoachCore:
         if self.recorder is not None and not getattr(self.recorder, "running", False):
             self.recorder = None              # the next start() builds one that reads exactly these keys
         return True
+
+    def set_free_aspect(self, free: bool) -> None:
+        """``True``: the coach may change the area's proportion per axis (like players who ignore 16:9).
+
+        The proportion of the area against the screen then changes on purpose: circles are drawn a little
+        stretched in hand movement, which many experienced players prefer for more room on one axis.
+        """
+        self.aspect_lock = not free
 
     def set_analysis_detail(self, detail: str) -> None:
         """``normal`` (3x4) | ``fine`` (6x8) | ``very_fine`` (9x12): grid of the next reports."""
@@ -254,6 +264,32 @@ class CoachCore:
             issues.append(Reason("play.prep.pen_tip"))
         return Readiness(osu is not None, osu.flavor if osu else None, title, self.beatmap, keys_ok, tuple(issues),
                          self.keys)
+
+    def track_map(self) -> bool:
+        """Poll osu!'s window title (cheap) and switch to the map it names. True when the map just changed.
+
+        osu! only shows the map in the title while it is being played, so a menu title ("osu!") says nothing
+        and the current map is kept; the next title that names a map is looked up again. Call it every second or so
+        in every phase: the map is often only known once the play has started, and a stale one would make the
+        whole round be judged against the previous map.
+        """
+        osu = self.watcher.process
+        if osu is None:
+            return False
+        title = self._title_source()
+        if title == self._last_title:
+            return False
+        self._last_title = title
+        if parse_window_title(title) is None:
+            return False
+        before = self.beatmap.path if self.beatmap is not None else None
+        self.beatmap, self._manual_map = None, False
+        self._find_map(title, osu.path)
+        after = self.beatmap.path if self.beatmap is not None else None
+        if after != before:
+            self.live_report = None          # the clicks must be matched to the new map from scratch
+            return True
+        return False
 
     def _keys_readable(self) -> bool:
         if self._recorder_factory is not self._default_recorder:
@@ -348,9 +384,12 @@ class CoachCore:
         if proposal.kind == "none" and proposal.verdict == opt.PLATEAU:
             convergence = Convergence(opt.PLATEAU, proposal.message or convergence.message,
                                       convergence.rounds, convergence.last_gain)
+        this_map = self.beatmap.path
+        map_changed = bool(self._round_maps) and self._round_maps[-1] != this_map
+        self._round_maps.append(this_map)
         self.result = RoundResult(report, tuple(findings_mod.findings(report)) if report.trusted else
                                   (Reason("play.find.untrusted"),), proposal, convergence, self.marks(),
-                                  from_replay=from_replay, hint=hint)
+                                  from_replay=from_replay, hint=hint, map_changed=map_changed)
         self.phase = "report"
         return self.result
 
@@ -421,6 +460,8 @@ class CoachCore:
         changes = proposal.changes if proposal else None
         if proposal is None or changes is None:
             return CoachFeedback(False, message=Reason("play.msg.nothing_to_apply"), sound="error")
+        if not self.aspect_lock and changes.tablet_area is not None and changes.lock_aspect_ratio is None:
+            changes = replace(changes, lock_aspect_ratio=False)    # OTD must not snap the area back to the screen's ratio
         outcome = self.tuner.propose(changes)
         if not outcome.accepted:
             return CoachFeedback(False, outcome.reasons, Reason("play.msg.rejected"), "error")

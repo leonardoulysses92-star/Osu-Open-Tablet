@@ -135,6 +135,61 @@ class ReadinessTests(unittest.TestCase):
         env.title = TITLE                                             # another map loaded -> looked up again
         self.assertEqual(env.core.readiness().beatmap.version, "Hard")
 
+    def second_map(self, env: Env) -> None:
+        folder = env.dir / "osu!" / "Songs" / "2 Artist - Song"
+        folder.mkdir()
+        (folder / "Artist - Song (me) [Easy].osu").write_text(OSU_FILE.replace("Version:Hard", "Version:Easy"),
+                                                              encoding="utf-8")
+
+    def test_track_map_follows_osu_to_another_map_without_a_second_lap(self) -> None:
+        env = Env(self)
+        self.second_map(env)
+        self.assertEqual(env.core.readiness().beatmap.version, "Hard")
+        self.assertTrue(env.core.start())
+        env.core.analyze_live()
+        self.assertFalse(env.core.track_map())                        # same title: nothing changed
+        env.title = "osu!  - Artist - Song [Easy]"                   # osu! names the new map once it is played
+        self.assertTrue(env.core.track_map())
+        self.assertEqual(env.core.beatmap.version, "Easy")
+        self.assertIsNone(env.core.live_report)                       # clicks are matched to the new map from scratch
+        env.title = "osu!"                                            # menu title says nothing: the map stays
+        self.assertFalse(env.core.track_map())
+        self.assertEqual(env.core.beatmap.version, "Easy")
+
+    def test_track_map_without_osu_or_with_an_unknown_map(self) -> None:
+        self.assertFalse(Env(self, osu_open=False).core.track_map())
+        env = Env(self)
+        env.core.readiness()
+        env.title = "osu!  - Someone - Else [Easy]"                   # not in Songs: the old map must not linger
+        self.assertTrue(env.core.track_map())
+        self.assertIsNone(env.core.beatmap)
+
+    def test_a_round_on_another_map_is_flagged(self) -> None:
+        env = Env(self)
+        self.second_map(env)
+        self.assertFalse(env.play_round().map_changed)                # the first round has nothing to compare with
+        self.assertFalse(env.play_round().map_changed)                # same map again
+        env.title = "osu!  - Artist - Song [Easy]"
+        self.assertTrue(env.core.track_map())
+        self.assertTrue(env.play_round().map_changed)
+        self.assertFalse(env.play_round().map_changed)
+
+    def test_free_proportion_is_applied_with_the_lock_off(self) -> None:
+        from dataclasses import replace as _replace
+        env = Env(self)
+        env.core.set_free_aspect(True)
+        env.play_round()
+        area = env.core.area
+        stretched = _replace(area, width=round(area.width * 0.96, 2))          # one axis only: the proportion changes
+        proposal = _replace(env.core.result.proposal, kind="scale", area=stretched)
+        env.core.result = _replace(env.core.result, proposal=proposal)
+        self.assertTrue(env.core.apply_proposal().ok)
+        live = env.core.tuner.settings
+        profile_area = env.core.area
+        self.assertEqual(profile_area.width, stretched.width)
+        self.assertNotAlmostEqual(profile_area.width / profile_area.height, area.width / area.height, places=2)
+        self.assertFalse(env.core.profile.lock_aspect_ratio)                    # OTD will not snap it back
+
     def test_lazer_is_flagged(self) -> None:
         env = Env(self)
         env.core.watcher._lister = lambda: [ProcessEntry(9, "osu!lazer.exe", "C:/lazer/osu!lazer.exe")]

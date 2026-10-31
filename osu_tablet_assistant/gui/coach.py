@@ -38,10 +38,12 @@ from .companion import companion_args_from_session, make_click_through
 from .i18n import t as default_t
 from .keycard import ClickKeysCard
 from .tabletmap import TabletMap
-from .widgets import (COLORS, Card, Chip, Expander, Notice, WrapLabel, apply_theme, bullets, button, check,
-                      dark_title_bar, frame, icon_image, label, px, surface_color)
+from .widgets import (COLORS, Card, Chip, Expander, Notice, ScrollFrame, WrapLabel, apply_theme, bullets, button,
+                      check, dark_title_bar, frame, icon_image, label, px, surface_color)
 
 TICK_MS = 100
+MAP_POLL_S = 1.0       # how often osu!'s window title is read to notice a new map
+MAP_NOTE_S = 6.0       # how long "new map recognised" replaces the status line while observing
 COACH_HOTKEY = "ctrl+alt+p"
 
 __all__ = ["CoachCore", "CoachWindow", "MiniMap", "Readiness", "RoundResult", "open_coach", "say"]
@@ -94,6 +96,7 @@ class CoachWindow:
         if core is None and config is not None:
             core_kwargs.setdefault("keys", config.effective_click_keys)
             core_kwargs.setdefault("analysis_detail", config.analysis_detail)
+            core_kwargs.setdefault("aspect_lock", not config.free_aspect)
         self.core = core if core is not None else self._core_from_session(session, settings, **core_kwargs)
         self.key_choice = config.key_choice if config is not None else KeyChoice.make(self.core.keys)
         self.core.set_keys(self.key_choice.effective)
@@ -109,6 +112,9 @@ class CoachWindow:
         self._interval = ANALYSIS_EVERY_S      # grows when one analysis is slow (it competes with the cursor sampler)
         self._closed = False
         self._job: str | None = None
+        self._last_map_poll = 0.0
+        self._map_note_until = 0.0             # while observing: the "new map recognised" line stays this long
+        self._map_note = ""
         self.mini: MiniMap | None = None
         self.own_root = parent is None
         self.root = tk.Tk() if parent is None else tk.Toplevel(parent)
@@ -120,6 +126,8 @@ class CoachWindow:
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self._geometry_before_observe: str | None = None
         self.body: ttk.Frame | None = None
+        self.footer: ttk.Frame | None = None      # the action bar of the prepare and report screens
+        self._scroll: ScrollFrame | None = None
         self.map: TabletMap | None = None
         self.status = Notice(self.root)
         self.show_phase("prepare")
@@ -153,12 +161,24 @@ class CoachWindow:
     def show_phase(self, phase: str) -> None:
         core = self.core
         core.phase = phase
-        if self.body is not None:
-            self.body.destroy()
-        self.body = ttk.Frame(self.root, padding=px(self.root, 16))
-        self.body.pack(fill="both", expand=True)
-        self.map, self.keys_card, self._hint_button = None, None, None
+        for old in (self.body, self.footer, self._scroll):
+            if old is not None:
+                old.destroy()
         compact = phase == "observe"
+        if compact:                                     # the small always-on-top panel: nothing to scroll
+            self.footer = self._scroll = None
+            self.body = ttk.Frame(self.root, padding=px(self.root, 16))
+            self.body.pack(fill="both", expand=True)
+        else:
+            # The actions live in a bar that never scrolls away (save / play again are always in reach);
+            # the rest scrolls, so nothing is cut off on a short screen.
+            self.footer = ttk.Frame(self.root, padding=(px(self.root, 16), px(self.root, 8)))
+            self.footer.pack(side="bottom", fill="x")
+            self._scroll = ScrollFrame(self.root)
+            self._scroll.pack(fill="both", expand=True)
+            self.body = ttk.Frame(self._scroll.body, padding=px(self.root, 16))
+            self.body.pack(fill="both", expand=True)
+        self.map, self.keys_card, self._hint_button = None, None, None
         self._set_window_mode(compact)
         {"prepare": self._build_prepare, "observe": self._build_observe, "report": self._build_report}[phase]()
 
@@ -205,8 +225,7 @@ class CoachWindow:
         card = Card(self.body, self.t("play.prepare.check_title"))
         card.pack(fill="x", pady=(0, px(self.root, 8)))
         self._check_row(card.body, ready.osu_running, self.t("play.prepare.osu_open"))
-        self._check_row(card.body, ready.beatmap is not None,
-                        ready.beatmap.display_name if ready.beatmap else self.t("play.prepare.map_missing"))
+        self._check_row(card.body, ready.beatmap is not None, self._map_line())
         if ready.beatmap is None:
             row = frame(card.body)
             row.pack(fill="x", pady=(px(self.root, 4), 0))
@@ -216,6 +235,9 @@ class CoachWindow:
         self.keys_card = ClickKeysCard(self.body, self.key_choice, self.t, self._keys_changed, core.analysis_detail,
                                        self._detail_changed, self._keys_state)
         self.keys_card.pack(fill="x", pady=(0, px(self.root, 8)))
+        self._free_var = tk.BooleanVar(value=not core.aspect_lock)
+        check(self.body, self.t("play.aspect.label"), self._free_var, command=self._aspect_changed).pack(anchor="w")
+        WrapLabel(self.body, self.t("play.aspect.note"), "Small").pack(fill="x", pady=(0, px(self.root, 8)))
         self.map = TabletMap(self.body, height=190)
         self.map.pack(fill="x", pady=(0, px(self.root, 8)))
         self.map.set_setup(core.tablet, core.area, core.display)
@@ -223,7 +245,9 @@ class CoachWindow:
             fill="x", pady=(0, px(self.root, 10)))
         if core.result is None and core.state.rounds:
             WrapLabel(self.body, self._progress_text(), "Muted").pack(fill="x", pady=(0, px(self.root, 6)))
-        actions = frame(self.body)
+        self.status = Notice(self.footer)               # messages and buttons sit in the bar that never scrolls away
+        self.status.pack(fill="x", pady=(0, px(self.root, 6)))
+        actions = frame(self.footer)
         actions.pack(fill="x")
         start = button(actions, self.t("play.prepare.start"), self.start_observing, kind="primary")
         start.pack(side="left")
@@ -240,11 +264,9 @@ class CoachWindow:
         check(self.body, self.t("play.prepare.minimap"), self._mini_var, command=self._toggle_mini).pack(
             anchor="w", pady=(px(self.root, 2), 0))
         WrapLabel(self.body, self.t("play.prepare.minimap_note"), "Small").pack(fill="x")
-        self.status = Notice(self.body)
-        self.status.pack(fill="x", pady=(px(self.root, 8), 0))
         if core.state.rounds:
             self._build_progress_strip(self.body)
-            self._build_keep_row(self.body)
+            self._build_keep_row(self.footer)
 
     def _keys_changed(self, choice: KeyChoice) -> None:
         """The player changed their click buttons: use them, save them, refresh the screen when not listening."""
@@ -253,6 +275,12 @@ class CoachWindow:
         self._save_config(lambda cfg: cfg.set_key_choice(choice))
         if self.keys_card is None or not self.keys_card.listening:
             self.show_phase("prepare")
+
+    def _aspect_changed(self) -> None:
+        """Free proportion on/off: the next proposals may (or may not) stretch the area on one axis only."""
+        free = bool(self._free_var.get())
+        self.core.set_free_aspect(free)
+        self._save_config(lambda cfg: setattr(cfg, "free_aspect", free))
 
     def _detail_changed(self, detail: str) -> None:
         self.core.set_analysis_detail(detail)
@@ -302,7 +330,10 @@ class CoachWindow:
 
     # -- observe
     def start_observing(self) -> None:
-        if self.core.phase == "observe" or not self.core.readiness(refresh=False).can_start:
+        if self.core.phase == "observe":
+            return
+        self.core.track_map()                  # never start on the previous map when osu! already loaded another
+        if not self.core.readiness(refresh=False).can_start:
             return
         if not self.core.start():
             return
@@ -314,6 +345,7 @@ class CoachWindow:
     def _build_observe(self) -> None:
         self._observe_var = tk.StringVar(value=self.t("play.observe.searching"))
         label(self.body, self.t("play.observe.title"), "Heading").pack(anchor="w")
+        WrapLabel(self.body, self._map_line(), "Muted").pack(fill="x")
         self.map = TabletMap(self.body, height=200, compact=False)
         self.map.pack(fill="both", expand=True)
         self.map.set_setup(self.core.tablet, self.core.area, self.core.display)
@@ -334,6 +366,9 @@ class CoachWindow:
         assert result is not None
         report, proposal = result.report, result.proposal
         self._title_block("play.report.title")
+        WrapLabel(self.body, self._map_line(), "Muted").pack(fill="x", pady=(0, px(self.root, 4)))
+        if result.map_changed:
+            WrapLabel(self.body, self.t("play.map.compare_note"), "Small").pack(fill="x", pady=(0, px(self.root, 6)))
         self.map = TabletMap(self.body, height=190)
         self.map.pack(fill="x", pady=(0, px(self.root, 6)))
         self.map.set_setup(core.tablet, core.area, core.display)
@@ -361,7 +396,9 @@ class CoachWindow:
         elif result.check is not None:
             self._build_check(result.check)
         done = proposal.kind == "none"
-        actions = frame(self.body)
+        self.status = Notice(self.footer)               # the whole action bar stays visible while the report scrolls
+        self.status.pack(fill="x", pady=(0, px(self.root, 6)))
+        actions = frame(self.footer)
         actions.pack(fill="x")
         if done and proposal.verdict == opt.PLATEAU:
             button(actions, self.t("play.report.keep"), self.keep, kind="primary").pack(side="left")
@@ -373,9 +410,7 @@ class CoachWindow:
             button(actions, self.t("play.report.apply"), self.apply, kind="primary").pack(side="left")
             button(actions, self.t("play.report.skip"), self.skip, kind="secondary").pack(
                 side="left", padx=(px(self.root, 8), 0))
-        self.status = Notice(self.body)
-        self.status.pack(fill="x", pady=(px(self.root, 8), 0))
-        row = frame(self.body)
+        row = frame(self.footer)
         row.pack(fill="x", pady=(px(self.root, 4), 0))
         undo = button(row, self.t("play.report.undo"), self.undo, kind="ghost")
         undo.pack(side="left")
@@ -384,7 +419,7 @@ class CoachWindow:
                 side="left", padx=(px(self.root, 4), 0))
         undo.configure(state="normal" if core.tuner.can_undo else "disabled")
         if not (done and proposal.verdict == opt.PLATEAU):
-            self._build_keep_row(self.body, only_restore=False)
+            self._build_keep_row(self.footer, only_restore=False)
         else:
             button(row, self.t("play.report.restore"), self.restore, kind="ghost").pack(side="left")
         tech = Expander(self.body, self.t("gui.details.title"), height=8)
@@ -514,11 +549,40 @@ class CoachWindow:
             return
         try:
             self._handle_actions()
+            self._tick_map()
             if self.core.phase == "observe":
                 self._tick_observe()
         finally:
             if not self._closed:
                 self._job = self.root.after(TICK_MS, self._tick)
+
+    def _map_line(self) -> str:
+        """The map the analysis is judged against, in words (so the player can tell it was recognised)."""
+        beatmap = self.core.beatmap
+        return self.t("play.map.now", name=beatmap.display_name) if beatmap is not None \
+            else self.t("play.prepare.map_missing")
+
+    def _tick_map(self) -> None:
+        """Once a second: did osu! load another map? (it names the map in its title only while playing)"""
+        now = time.monotonic()
+        if now - self._last_map_poll < MAP_POLL_S:
+            return
+        self._last_map_poll = now
+        if self.core.track_map():
+            self._on_map_changed()
+
+    def _on_map_changed(self) -> None:
+        core = self.core
+        beatmap = core.beatmap
+        name = beatmap.display_name if beatmap is not None else None
+        if core.phase == "observe":
+            self._map_note = self.t("play.map.changed", name=name) if name else self.t("play.map.lost")
+            self._map_note_until = time.monotonic() + MAP_NOTE_S
+            if self.map is not None:
+                self.map.clear_play()                 # the dots belonged to the previous map
+            self._observe_var.set(self._map_note)
+        elif core.phase in ("prepare", "report") and not (self.keys_card is not None and self.keys_card.listening):
+            self.show_phase(core.phase)               # redraw: the map line (and the start button) follow the new map
 
     def _handle_actions(self) -> None:
         while True:
@@ -553,6 +617,8 @@ class CoachWindow:
         if view is not None:
             text = self.t("play.observe.searching") if core.searching() else self.t(
                 "play.observe.running", clicks=view.clicks)
+            if time.monotonic() < self._map_note_until:
+                text = self._map_note
             hint = core.no_clicks_hint(view)
             if hint is not None:
                 text = self._say(hint)
