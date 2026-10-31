@@ -83,6 +83,32 @@ class CoachWindowTests(unittest.TestCase):
         self.assertEqual(self.env.core.phase, "prepare")
         self.assertIn(i18n.t("play.prepare.pick_map"), self.texts(win.body))
 
+    def test_replay_buttons_and_the_check_line(self) -> None:
+        from pathlib import Path
+        from unittest import mock
+        from test_coach import ReplayRoundTests
+        helper = ReplayRoundTests()
+        win = self.window()
+        self.assertIn(i18n.t("play.prepare.use_replay"), self.texts(win.body))
+        path = helper.osr(self.env)
+        with mock.patch.object(self.coach.filedialog, "askopenfilename", return_value=str(path)):
+            win.pick_replay("round")
+        win.root.update()
+        self.assertEqual(self.env.core.phase, "report")
+        self.assertIn(i18n.t("play.replay.used"), self.texts(win.body))
+        self.assertNotIn(i18n.t("play.report.verify_replay"), self.texts(win.body))
+        win.play_again()
+        win.start_observing()
+        win.stop_observing()
+        self.assertIn(i18n.t("play.report.verify_replay"), self.texts(win.body))
+        with mock.patch.object(self.coach.filedialog, "askopenfilename", return_value=str(path)):
+            win.pick_replay("verify")
+        win.root.update()
+        self.assertIn("%", self.texts(win.body))
+        self.assertNotIn("play.replay", self.texts(win.body))
+        with mock.patch.object(self.coach.filedialog, "askopenfilename", return_value=""):
+            win.pick_replay("round")                      # cancelling the dialog changes nothing
+
     def test_hotkey_toggles_observation(self) -> None:
         win = self.window()
         win._actions.put("coach_toggle")

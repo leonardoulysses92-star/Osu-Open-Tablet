@@ -303,6 +303,8 @@
  "gui.settings.check_on_start": "Buscar datos nuevos de la comunidad al iniciar el programa",
  "gui.settings.clear": "Usar la carpeta Presets de OpenTabletDriver",
  "gui.settings.close": "Cerrar",
+ "gui.settings.ledger_help": "Solo lo necesario para ajustar la tableta, todo en este PC.",
+ "gui.settings.ledger_title": "Qué datos usa el asistente",
  "gui.settings.name_template": "Nombre del archivo",
  "gui.settings.name_template_help": "{tablet} y {timestamp} se rellenan solos. Igualmente puedes editar el nombre cada vez que guardes.",
  "gui.settings.open": "Ajustes",

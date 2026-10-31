@@ -34,6 +34,7 @@ from ..models import (
     Priority,
     SkillLevel,
 )
+from .coachcore import ledger_text
 from .i18n import t, tr
 from .session import (
     BASELINE_KINDS,
@@ -1631,6 +1632,9 @@ class SettingsDialog(tk.Toplevel):
         self._profile_button.pack(anchor="w")
         if self.session.profile_store is None or not self.session.profile_store.profiles:
             self._profile_button.configure(state="disabled")
+        ledger = Card(body, t("gui.settings.ledger_title"), t("gui.settings.ledger_help"))
+        ledger.pack(fill="x", pady=(0, px(self, 12)))
+        WrapLabel(ledger.body, ledger_text(t), "Small").pack(fill="x")
         self.data = DataCard(body, wizard, settings_button=False)
         self.data.pack(fill="x", pady=(0, px(self, 12)))
         self.message = Notice(body)

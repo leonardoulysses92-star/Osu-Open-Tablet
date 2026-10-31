@@ -31,7 +31,8 @@ from ..engine.playtypes import PlayReport
 from ..models import Reason
 from ..otd.livetune import LiveTuner, controller_sender, dry_run_sender
 from . import hotkeys as hk
-from .coachcore import (ANALYSIS_EVERY_S, PHASES, CoachCore, CoachFeedback, Readiness, RoundResult, Translate, say)
+from .coachcore import (ANALYSIS_EVERY_S, PHASES, CoachCore, CoachFeedback, Readiness, RoundResult, Translate,
+                        ledger_text, say)
 from .companion import companion_args_from_session, make_click_through
 from .i18n import t as default_t
 from .tabletmap import TabletMap
@@ -210,13 +211,15 @@ class CoachWindow:
         start = button(actions, self.t("play.prepare.start"), self.start_observing, kind="primary")
         start.pack(side="left")
         start.configure(state="normal" if ready.can_start else "disabled")
+        button(actions, self.t("play.prepare.use_replay"), lambda: self.pick_replay("round"), kind="ghost").pack(
+            side="left", padx=(px(self.root, 8), 0))
         if self.hotkeys.available:
             label(actions, self.t("play.prepare.hotkey", key=COACH_HOTKEY.replace("+", " + ").title()), "Small").pack(
                 side="left", padx=(px(self.root, 12), 0))
         self._mini_var = tk.BooleanVar(value=self.mini is not None)
-        adv = Expander(self.body, self.t("play.prepare.options"), height=4)
+        adv = Expander(self.body, self.t("play.prepare.options"), height=9)
         adv.pack(fill="x", pady=(px(self.root, 10), 0))
-        adv.set(self.t("play.prepare.options_text", keys=", ".join(core.keys)))
+        adv.set(ledger_text(self.t, core.keys))
         check(self.body, self.t("play.prepare.minimap"), self._mini_var, command=self._toggle_mini).pack(
             anchor="w", pady=(px(self.root, 2), 0))
         WrapLabel(self.body, self.t("play.prepare.minimap_note"), "Small").pack(fill="x")
@@ -298,6 +301,10 @@ class CoachWindow:
             WrapLabel(self.body, self._say(proposal.message), "Muted").pack(fill="x", pady=(0, px(self.root, 8)))
         self._build_progress_strip(self.body)
         WrapLabel(self.body, self._say(result.convergence.message), "Strong").pack(fill="x", pady=(0, px(self.root, 8)))
+        if result.from_replay:
+            WrapLabel(self.body, self.t("play.replay.used"), "Small").pack(fill="x", pady=(0, px(self.root, 6)))
+        elif result.check is not None:
+            self._build_check(result.check)
         done = proposal.kind == "none"
         actions = frame(self.body)
         actions.pack(fill="x")
@@ -317,6 +324,9 @@ class CoachWindow:
         row.pack(fill="x", pady=(px(self.root, 4), 0))
         undo = button(row, self.t("play.report.undo"), self.undo, kind="ghost")
         undo.pack(side="left")
+        if not result.from_replay and result.check is None:
+            button(row, self.t("play.report.verify_replay"), lambda: self.pick_replay("verify"), kind="ghost").pack(
+                side="left", padx=(px(self.root, 4), 0))
         undo.configure(state="normal" if core.tuner.can_undo else "disabled")
         if not (done and proposal.verdict == opt.PLATEAU):
             self._build_keep_row(self.body, only_restore=False)
@@ -325,6 +335,34 @@ class CoachWindow:
         tech = Expander(self.body, self.t("gui.details.title"), height=8)
         tech.pack(fill="x", pady=(px(self.root, 6), 0))
         tech.set(self._technical_text(report, result))
+
+    def _build_check(self, check: Any) -> None:
+        """How well the coach's inference matched the game's own replay (plain words, one line + one hint)."""
+        good = check.agreement >= 0.9
+        text = self.t("play.replay.check", pct=f"{check.agreement * 100:.0f}", n=check.compared)
+        if check.real_accuracy is not None:
+            text += " " + self.t("play.replay.accuracy", acc=f"{check.real_accuracy * 100:.1f}")
+        card = Notice(self.body)
+        card.pack(fill="x", pady=(0, px(self.root, 6)))
+        card.show(text + " " + self.t("play.replay.check_good" if good else "play.replay.check_weak"),
+                  "success" if good else "warn")
+
+    def pick_replay(self, mode: str) -> None:
+        """Choose an .osr: ``round`` uses it as a round, ``verify`` compares it with the last live round."""
+        folder = self.core.replay_dir()
+        path = filedialog.askopenfilename(parent=self.root, title=self.t("play.replay.pick"),
+                                          initialdir=str(folder) if folder else None,
+                                          filetypes=[("osu! replay", "*.osr"), ("*", "*")])
+        if not path:
+            return
+        outcome = self.core.round_from_replay(path) if mode == "round" else self.core.verify_with_replay(path)
+        if not outcome.ok:
+            messagebox.showwarning(self.t("play.title"), self._say(outcome.problem) if outcome.problem else "",
+                                   parent=self.root)
+            return
+        self.show_phase("report")
+        if outcome.problem is not None:           # read fine, but it is of another map file
+            self.status.show(self._say(outcome.problem), "warn")
 
     def _build_progress_strip(self, parent: tk.Misc) -> None:
         marks = self.core.marks()

@@ -255,6 +255,77 @@ class RoundTests(unittest.TestCase):
         self.assertEqual(text, "Te quedas corto en la esquina inferior derecha: ≈ 3 mm")
 
 
+class ReplayRoundTests(unittest.TestCase):
+    def osr(self, env: Env, md5: str | None = None, junk: bool = False) -> Path:
+        from test_replay import make_osr
+        beatmap = env.core.readiness().beatmap
+        capture = simulate(MAP, _player(env.tuner.profile().tablet_area), seed=9, area=env.tuner.profile().tablet_area,
+                           display=DISPLAY, t0=40.0)
+        import hashlib
+        digest = md5 or hashlib.md5(Path(beatmap.path).read_bytes()).hexdigest()
+        path = env.dir / "play.osr"
+        path.write_bytes(b"not a replay" if junk else make_osr(capture, md5=digest))
+        return path
+
+    def test_a_replay_can_be_the_round(self) -> None:
+        env = Env(self)
+        env.core.readiness()
+        outcome = env.core.round_from_replay(self.osr(env))
+        self.assertTrue(outcome.ok)
+        self.assertTrue(outcome.same_map)
+        result = env.core.result
+        self.assertTrue(result.from_replay and result.report.trusted)
+        self.assertIn(result.proposal.kind, ("shift", "scale"))
+        self.assertEqual(env.core.phase, "report")
+        self.assertEqual(env.core.state.rounds[0].kind, "start")
+
+    def test_replay_of_another_map_file_is_flagged_not_hidden(self) -> None:
+        env = Env(self)
+        env.core.readiness()
+        outcome = env.core.round_from_replay(self.osr(env, md5="0" * 32))
+        self.assertTrue(outcome.ok)
+        self.assertFalse(outcome.same_map)
+        self.assertEqual(outcome.problem.key, "play.replay.other_map")
+
+    def test_bad_file_or_no_map_changes_nothing(self) -> None:
+        env = Env(self)
+        env.core.readiness()
+        bad = env.core.round_from_replay(self.osr(env, junk=True))
+        self.assertEqual((bad.ok, bad.problem.key), (False, "play.replay.unreadable"))
+        self.assertEqual(env.core.state.rounds, ())
+        nomap = Env(self, title="osu!")
+        nomap.core.readiness()
+        self.assertEqual(nomap.core.round_from_replay(self.osr(env)).problem.key, "play.replay.no_map")
+
+    def test_verifying_a_live_round_reports_how_well_it_matched(self) -> None:
+        env = Env(self)
+        self.assertEqual(env.core.verify_with_replay(self.osr(env)).problem.key, "play.replay.nothing_to_check")
+        env.play_round()
+        outcome = env.core.verify_with_replay(self.osr(env))
+        self.assertTrue(outcome.ok)
+        self.assertGreater(outcome.check.compared, 50)
+        self.assertGreater(outcome.check.agreement, 0.8)
+        self.assertIs(env.core.result.check, outcome.check)
+        self.assertEqual(len(env.core.state.rounds), 1)            # verifying is not a new round
+
+
+class DataLedgerTests(unittest.TestCase):
+    def test_every_item_is_explained_in_both_languages_and_names_the_keys(self) -> None:
+        from osu_tablet_assistant.gui import i18n
+        self.addCleanup(i18n.set_language, "es")
+        for lang in i18n.SUPPORTED:
+            i18n.set_language(lang)
+            text = coach.ledger_text()
+            self.assertEqual(text.count("•"), len(coach.DATA_LEDGER))
+            self.assertNotIn("play.data", text)
+            self.assertIn("z, x, mouse1, mouse2", text)
+
+    def test_the_ledger_matches_what_the_code_really_reads(self) -> None:
+        # the recorder only knows the configured keys, the replay keeps no identity, the profile no play data
+        self.assertEqual(playwatch.DEFAULT_CLICK_KEYS, ("z", "x", "mouse1", "mouse2"))
+        self.assertEqual(set(coach.DATA_LEDGER), {"cursor", "keys", "window", "map", "replay", "profile", "never"})
+
+
 class PlayRecorderTests(unittest.TestCase):
     def make(self, states: list[dict[str, bool]], keys=("z", "x")):
         clock = iter(x * 0.01 for x in range(1000))

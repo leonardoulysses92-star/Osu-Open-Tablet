@@ -11,10 +11,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
-from ..engine import adapt, findings as findings_mod, optimizer as opt
+from ..engine import adapt, findings as findings_mod, optimizer as opt, replay as replay_mod
 from ..engine.beatmap import BeatmapIndex, find_beatmap, load_beatmap, parse_window_title
 from ..engine.playobserve import ALIGN_TRUST, analyze_play
-from ..engine.playtypes import Beatmap, Convergence, PlayReport
+from ..engine.playtypes import Beatmap, Convergence, PlayCapture, PlayReport
 from ..knowledge.filters import FilterSpec, load_catalog
 from ..models import DisplaySpec, Reason, Rect, TabletSpec, UserPreferences
 from ..otd.livetune import LiveTuner, OsuWatcher
@@ -27,6 +27,13 @@ AUTO_STOP_IDLE_S = 8.0
 AUTO_STOP_MIN_CLICKS = 20
 PHASES = ("prepare", "observe", "report")
 Translate = Callable[..., str]
+# Everything the coach and its helpers collect, nothing more (each id has a ``play.data.<id>`` text).
+DATA_LEDGER = ("cursor", "keys", "window", "map", "replay", "profile", "never")
+
+
+def ledger_text(translate: Translate = default_t, keys: Sequence[str] = DEFAULT_CLICK_KEYS) -> str:
+    """The plain-language list of what is collected, why, and where it stays (shown in the app)."""
+    return "\n".join("• " + translate(f"play.data.{item}", keys=", ".join(keys)) for item in DATA_LEDGER)
 
 
 def say(reason: Reason, translate: Translate = default_t) -> str:
@@ -69,6 +76,18 @@ class RoundResult:
     proposal: opt.RoundProposal
     convergence: Convergence
     marks: tuple[str, ...]
+    check: replay_mod.InferenceCheck | None = None    # live inference vs the game's own replay, when one was given
+    from_replay: bool = False
+
+
+@dataclass(frozen=True)
+class ReplayOutcome:
+    """Result of reading a replay the player picked."""
+    ok: bool
+    problem: Reason | None = None
+    replay: replay_mod.Replay | None = None
+    same_map: bool | None = None            # False: the replay is of another map file (the report may be wrong)
+    check: replay_mod.InferenceCheck | None = None
 
 
 @dataclass(frozen=True)
@@ -223,7 +242,11 @@ class CoachCore:
         if self.recorder is None or self.beatmap is None:
             return None
         self.recorder.stop()
-        report = self._analyze(self.beatmap, self.recorder.snapshot())
+        return self._complete_round(self.recorder.snapshot())
+
+    def _complete_round(self, capture: PlayCapture, from_replay: bool = False) -> RoundResult:
+        assert self.beatmap is not None
+        report = self._analyze(self.beatmap, capture)
         pending, self._pending = self._pending, None
         profile = self.profile
         self.state, report = opt.record_round(
@@ -238,9 +261,54 @@ class CoachCore:
             convergence = Convergence(opt.PLATEAU, proposal.message or convergence.message,
                                       convergence.rounds, convergence.last_gain)
         self.result = RoundResult(report, tuple(findings_mod.findings(report)) if report.trusted else
-                                  (Reason("play.find.untrusted"),), proposal, convergence, self.marks())
+                                  (Reason("play.find.untrusted"),), proposal, convergence, self.marks(),
+                                  from_replay=from_replay)
         self.phase = "report"
         return self.result
+
+    # ---------------------------------------------------------------- replays
+    def replay_dir(self) -> Path | None:
+        """Where osu!stable keeps replays (``Replays`` next to ``Songs``), if it can be told."""
+        osu = self.watcher.process
+        songs = songs_dir_for(osu.path) if osu is not None else None
+        folder = songs.parent / "Replays" if songs is not None else None
+        return folder if folder is not None and folder.is_dir() else None
+
+    def _read_replay(self, path: str | Path) -> ReplayOutcome | tuple[replay_mod.Replay, PlayReport, bool | None]:
+        if self.beatmap is None:
+            return ReplayOutcome(False, Reason("play.replay.no_map"))
+        replay = replay_mod.load_replay(path)
+        if replay is None:
+            return ReplayOutcome(False, Reason("play.replay.unreadable"))
+        capture = replay_mod.replay_to_capture(replay, self.area, self.display, self.tablet)
+        return replay, self._analyze(self.beatmap, capture), replay_mod.matches_beatmap(replay, self.beatmap)
+
+    def round_from_replay(self, path: str | Path) -> ReplayOutcome:
+        """Use the game's own replay as the round (exact cursor and keys; works without reading any key)."""
+        if self.beatmap is None:
+            return ReplayOutcome(False, Reason("play.replay.no_map"))
+        replay = replay_mod.load_replay(path)
+        if replay is None:
+            return ReplayOutcome(False, Reason("play.replay.unreadable"))
+        same = replay_mod.matches_beatmap(replay, self.beatmap)
+        self._complete_round(replay_mod.replay_to_capture(replay, self.area, self.display, self.tablet),
+                             from_replay=True)
+        return ReplayOutcome(True, None if same is not False else Reason("play.replay.other_map"), replay, same)
+
+    def verify_with_replay(self, path: str | Path) -> ReplayOutcome:
+        """Compare what the coach inferred in the last live round with what the game recorded."""
+        if self.result is None or self.result.from_replay:
+            return ReplayOutcome(False, Reason("play.replay.nothing_to_check"))
+        read = self._read_replay(path)
+        if isinstance(read, ReplayOutcome):
+            return read
+        replay, real, same = read
+        check = replay_mod.compare_inference(self.result.report, real, replay)
+        if check is None:
+            return ReplayOutcome(False, Reason("play.replay.no_overlap"), replay, same)
+        self.result = RoundResult(self.result.report, self.result.findings, self.result.proposal,
+                                  self.result.convergence, self.result.marks, check, False)
+        return ReplayOutcome(True, None if same is not False else Reason("play.replay.other_map"), replay, same, check)
 
     def marks(self) -> tuple[str, ...]:
         """One mark per round: start / better / same / worse / unclear (no numbers)."""

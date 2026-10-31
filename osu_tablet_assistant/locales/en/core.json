@@ -303,6 +303,8 @@
  "gui.settings.check_on_start": "Check for new community data when the program starts",
  "gui.settings.clear": "Use OpenTabletDriver's Presets folder",
  "gui.settings.close": "Close",
+ "gui.settings.ledger_help": "Only what is needed to tune the tablet, all on this PC.",
+ "gui.settings.ledger_title": "What data the assistant uses",
  "gui.settings.name_template": "File name",
  "gui.settings.name_template_help": "{tablet} and {timestamp} are filled in. You can still edit the name every time you save.",
  "gui.settings.open": "Settings",
