@@ -44,6 +44,6 @@ powershell -ExecutionPolicy Bypass -File tools\release.ps1 -Version 0.9.0 -Notes
 El script comprueba los tests, sube el número de versión, añade la entrada al `CHANGELOG.md`, hace el commit y
 la etiqueta `v0.9.0`, compila el `.exe` y mueve el ejecutable anterior de la carpeta del Escritorio a
 `Versiones anteriores`, dejando solo el nuevo. No sube nada: al final muestra el comando `git push`, el archivo
-`dist\Osu-Open-Tablet-vX.Y.Z.exe` que hay que subir a un *Release* de GitHub para que cualquiera lo descargue
+`Osu-Open-Tablet-vX.Y.Z.exe` (en la carpeta del Escritorio, junto a `LICENSE`) que hay que subir a un *Release* de GitHub para que cualquiera lo descargue
 (con su huella SHA-256 en las notas) y avisa de que el ejecutable no está firmado.
 Con `-DryRun` solo muestra lo que haría.

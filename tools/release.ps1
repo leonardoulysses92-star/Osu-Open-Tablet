@@ -39,7 +39,7 @@ if (-not (& $git config user.name) -or -not (& $git config user.email)) {
     throw 'Set your git identity first: git config user.name "..." and git config user.email "..."'
 }
 $archive = Join-Path $Dest 'Versiones anteriores'
-$old = @(Get-ChildItem $Dest -Filter 'Osu Open Tablet v*.exe' -ErrorAction SilentlyContinue)
+$old = @(Get-ChildItem $Dest -Filter '*.exe' -ErrorAction SilentlyContinue | Where-Object { $_.Name -match '^Osu[- ]Open[- ]Tablet[- ]v\d' })
 
 if ($DryRun) {
     "DRY RUN for $tag"
@@ -47,7 +47,7 @@ if ($DryRun) {
     "  CHANGELOG.md entry: $Notes"
     "  commit + tag $tag, build_exe.ps1, open the exe once"
     "  move to '$archive': " + $(if ($old) { ($old.Name -join ', ') } else { '(nothing there yet)' })
-    "  copy the new exe to '$Dest\Osu Open Tablet v$Version.exe'"
+    "  copy the new exe to '$Dest\Osu-Open-Tablet-v$Version.exe' (no spaces: this is also the file to upload to GitHub)"
     return
 }
 
@@ -83,10 +83,9 @@ if ($old) {
     New-Item -ItemType Directory -Force $archive | Out-Null
     $old | ForEach-Object { Move-Item $_.FullName $archive -Force }
 }
-Copy-Item $built (Join-Path $Dest "Osu Open Tablet v$Version.exe") -Force
-
-$asset = Join-Path $root "dist\Osu-Open-Tablet-v$Version.exe"      # no spaces: this is the file to upload to GitHub
+$asset = Join-Path $Dest "Osu-Open-Tablet-v$Version.exe"      # no spaces: also the file to upload to GitHub
 Copy-Item $built $asset -Force
+
 "Done: $tag built and copied; the previous version is in '$archive'."
 "To publish the code:  git push origin main $tag"
 "To let anyone download it: create a GitHub release for $tag and upload '$asset'."
