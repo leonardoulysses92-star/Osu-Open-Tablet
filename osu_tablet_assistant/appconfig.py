@@ -20,7 +20,9 @@ from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import urlparse
 
+from .engine.adapt import DEFAULT_STEP_LEVEL, STEP_LEVELS
 from .engine.playtypes import ANALYSIS_DETAILS, DEFAULT_DETAIL
+from .gui.hotkeys import DEFAULT_BINDINGS, clean_bindings
 from .keys import DEFAULT_CLICK_KEYS, KeyChoice
 
 APP_DIR_NAME = "OsuOpenTablet"
@@ -68,6 +70,10 @@ class AppConfig:
     pen_clicks: bool = False
     analysis_detail: str = DEFAULT_DETAIL      # normal (3x4) | fine (6x8) | very_fine (9x12)
     free_aspect: bool = False                  # the coach may change the area's proportion (not only its size)
+    # Companion: global hotkeys per action ("" = none; never two actions on one combination, see
+    # ``gui.hotkeys.clean_bindings``) and the step size (normal | fine | very_fine).
+    companion_hotkeys: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_BINDINGS))
+    companion_step: str = DEFAULT_STEP_LEVEL
 
     @property
     def key_choice(self) -> KeyChoice:
@@ -108,11 +114,14 @@ def from_dict(data: Any) -> AppConfig:
         "pen_clicks": lambda v: isinstance(v, bool),
         "analysis_detail": lambda v: v in ANALYSIS_DETAILS,
         "free_aspect": lambda v: isinstance(v, bool),
+        "companion_hotkeys": lambda v: isinstance(v, dict) and len(v) <= 50,
+        "companion_step": lambda v: v in STEP_LEVELS,
     }
     for f in fields(AppConfig):
         if f.name in data and checks[f.name](data[f.name]):
             setattr(cfg, f.name, data[f.name])
     cfg.set_key_choice(cfg.key_choice)     # known names only, no duplicates, never zero ways to click
+    cfg.companion_hotkeys = clean_bindings(cfg.companion_hotkeys)   # valid, no collisions, every action
     return cfg
 
 

@@ -80,7 +80,84 @@ class ParseTest(unittest.TestCase):
         self.assertEqual(set(good), set(hk.ACTIONS))
 
 
+class Ev:
+    """A stand-in for a Tk key event."""
+
+    def __init__(self, keysym: str, state: int = 0, keycode: int = 0) -> None:
+        self.keysym, self.state, self.keycode = keysym, state, keycode
+
+
+CTRL_ALT_WIN = hk.TK_CONTROL | hk.TK_ALT_WIN
+
+
+class EditorHelpersTest(unittest.TestCase):
+    def test_step_action_has_a_free_default(self) -> None:
+        self.assertIn("step", hk.ACTIONS)
+        self.assertEqual(hk.DEFAULT_BINDINGS["step"], "ctrl+alt+p")
+        self.assertIn("step", hk.PATTERNS)
+
+    def test_display(self) -> None:
+        self.assertEqual(hk.display_hotkey("ctrl+alt+pageup"), "Ctrl+Alt+PageUp")
+        self.assertEqual(hk.display_hotkey("alt+ctrl+k"), "Ctrl+Alt+K")
+        self.assertEqual(hk.display_hotkey("shift+f9"), "Shift+F9")
+        self.assertEqual(hk.display_hotkey("nonsense"), "nonsense")
+
+    def test_conflict_with(self) -> None:
+        b = dict(hk.DEFAULT_BINDINGS)
+        self.assertEqual(hk.conflict_with(b, "keep", "Alt+Ctrl+Up"), "smoother")
+        self.assertIsNone(hk.conflict_with(b, "smoother", "ctrl+alt+up"))       # its own combination
+        self.assertIsNone(hk.conflict_with(b, "keep", "ctrl+shift+k"))
+        self.assertIsNone(hk.conflict_with({**b, "undo": "garbage"}, "keep", "ctrl+alt+j"))
+
+    def test_clean_bindings_from_saved_data(self) -> None:
+        self.assertEqual(hk.clean_bindings(None), hk.DEFAULT_BINDINGS)
+        self.assertEqual(hk.clean_bindings("ctrl+alt+up"), hk.DEFAULT_BINDINGS)
+        old_file = {a: v for a, v in hk.DEFAULT_BINDINGS.items() if a != "step"}   # saved before "step" existed
+        self.assertEqual(hk.clean_bindings(old_file), hk.DEFAULT_BINDINGS)
+        got = hk.clean_bindings({"smoother": "Alt+Ctrl+P", "keep": "bad+key", "undo": "ctrl+alt+up",
+                                 "looser": "", "unknown": "ctrl+alt+q", "precise": 5, "area_bigger": "x" * 99})
+        self.assertEqual(set(got), set(hk.ACTIONS))
+        self.assertEqual(got["smoother"], "ctrl+alt+p")
+        self.assertEqual(got["undo"], "ctrl+alt+up")
+        self.assertEqual(got["keep"], "ctrl+alt+k")             # invalid -> default
+        self.assertEqual(got["looser"], "")                     # explicitly no hotkey
+        self.assertEqual(got["precise"], "ctrl+alt+left")
+        self.assertEqual(got["step"], "")                       # its default is taken by "smoother": no key
+        good, errors = hk.parse_bindings(got)
+        self.assertEqual(errors, {})                            # never two actions on one combination
+        dup = hk.clean_bindings({"smoother": "ctrl+alt+j", "responsive": "alt+ctrl+j"})
+        self.assertEqual(dup["smoother"], "ctrl+alt+j")
+        self.assertEqual(dup["responsive"], "ctrl+alt+down")
+
+    def test_combo_from_tk_event_windows(self) -> None:
+        f = lambda e: hk.combo_from_tk_event(e, windows=True)   # noqa: E731
+        self.assertEqual(f(Ev("Up", CTRL_ALT_WIN)), ("ctrl+alt+up", "ok"))
+        self.assertEqual(f(Ev("Prior", CTRL_ALT_WIN)), ("ctrl+alt+pageup", "ok"))
+        self.assertEqual(f(Ev("P", CTRL_ALT_WIN | hk.TK_SHIFT)), ("ctrl+alt+shift+p", "ok"))
+        self.assertEqual(f(Ev("KP_5", hk.TK_CONTROL)), ("ctrl+num5", "ok"))
+        self.assertEqual(f(Ev("exclam", hk.TK_CONTROL | hk.TK_SHIFT, 0x31)), ("ctrl+shift+1", "ok"))  # by keycode
+        self.assertEqual(f(Ev("Control_L", hk.TK_CONTROL)), (None, "wait"))
+        self.assertEqual(f(Ev("Escape")), (None, "escape"))
+        self.assertEqual(f(Ev("k")), (None, "no_modifier"))
+        self.assertEqual(f(Ev("k", 0x8)), (None, "no_modifier"))          # 0x8 is Num Lock on Windows
+        self.assertEqual(f(Ev("odiaeresis", hk.TK_CONTROL, 0xFFFF)), (None, "unknown"))
+
+    def test_combo_from_tk_event_x11_alt(self) -> None:
+        self.assertEqual(hk.combo_from_tk_event(Ev("Up", hk.TK_CONTROL | hk.TK_MOD1), windows=False),
+                         ("ctrl+alt+up", "ok"))
+
+
 class ManagerTest(unittest.TestCase):
+    def test_set_bindings_does_not_register_until_start(self) -> None:
+        backend = FakeBackend()
+        mgr = hk.HotkeyManager(hk.DEFAULT_BINDINGS, lambda a: None, backend=backend)
+        mgr.start()
+        mgr.set_bindings({**hk.DEFAULT_BINDINGS, "step": ""})
+        self.assertFalse(mgr.running)
+        self.assertNotIn("step", mgr.hotkeys)
+        self.assertTrue(mgr.start()["smoother"])
+        mgr.stop()
+
     def test_registers_on_its_own_thread_and_delivers_actions(self) -> None:
         got: list[str] = []
         backend = FakeBackend()

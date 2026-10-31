@@ -329,6 +329,146 @@ class AreaTest(unittest.TestCase):
         self.assertLess(pcts[-1], pcts[0])
 
 
+FAMILY_PATHS = (RADIAL_TABLET, RADIAL_SCREEN, HAWKU, ANTICHATTER, RESAMPLER, NOISE_REDUCTION, CHATTER_RAW,
+                CHATTER_SMOOTH)
+
+
+def run_level(prof: ProfileInfo, intents, level, policy=None, tablet=CTL472):
+    state = AdaptState()
+    results = []
+    for intent in intents:
+        res = adapt.step(state, prof, intent, policy, CATALOG, tablet, level=level)
+        results.append(res)
+        state, prof = res.state, apply(prof, res)
+    return state, prof, results
+
+
+def assert_within_soft_limits(test: unittest.TestCase, before: ProfileInfo, after: ProfileInfo) -> None:
+    """Every value the engine changed is inside the catalog range AND the soft limits of its moves."""
+    for old, new in zip(before.filters, after.filters):
+        spec = CATALOG.get(new.path)
+        if spec is None:
+            continue
+        moves = {m.param: m for tiers in adapt.FAMILIES.get(new.path, {}).values() for tier in tiers for m in tier}
+        for name, val in new.settings.items():
+            if name not in moves or old.settings.get(name) == val:
+                continue
+            lo, hi = adapt._limits(spec.param(name), moves[name])
+            test.assertGreaterEqual(val, lo, f"{new.path}.{name}")
+            test.assertLessEqual(val, hi, f"{new.path}.{name}")
+
+
+class StepLevelTest(unittest.TestCase):
+    def test_levels_and_cycle(self) -> None:
+        self.assertEqual(adapt.STEP_LEVELS, ("normal", "fine", "very_fine"))
+        self.assertEqual(adapt.step_level(None), "normal")
+        self.assertEqual([adapt.next_step_level(x) for x in adapt.STEP_LEVELS], ["fine", "very_fine", "normal"])
+        with self.assertRaises(ValueError):
+            adapt.step_level("ultra")
+        with self.assertRaises(ValueError):
+            adapt.step(AdaptState(), profile(USER_RADIAL), Intent.SMOOTHER, catalog=CATALOG, level="ultra")
+        self.assertEqual([adapt.area_step_pct(x) for x in adapt.STEP_LEVELS], [2.0, 1.0, 0.5])
+
+    def test_normal_level_is_the_original_behaviour(self) -> None:
+        seq = [Intent.SMOOTHER, Intent.SMOOTHER, Intent.RESPONSIVE, Intent.PRECISE, Intent.AREA_BIGGER,
+               Intent.LOOSER, Intent.SMOOTHER, Intent.AREA_SMALLER]
+        self.assertEqual(run(profile(USER_RADIAL), seq)[:2], run_level(profile(USER_RADIAL), seq, "normal")[:2])
+
+    def test_fine_grids(self) -> None:
+        latency = CATALOG[HAWKU].param("Latency")                     # catalog step 0.5 ms
+        self.assertEqual([adapt.grid_step(latency, x) for x in adapt.STEP_LEVELS], [0.5, 0.1, 0.05])
+        threshold = CATALOG[NOISE_REDUCTION].param("DistanceThreshold")   # 0.05 mm
+        self.assertEqual([adapt.grid_step(threshold, x) for x in adapt.STEP_LEVELS], [0.05, 0.01, 0.005])
+        samples = CATALOG[NOISE_REDUCTION].param("Samples")           # ints keep whole steps
+        self.assertEqual([adapt.grid_step(samples, x) for x in adapt.STEP_LEVELS], [1.0, 1.0, 1.0])
+        coef = CATALOG[RADIAL_TABLET].param("SmoothingCoefficient")    # 0.001: the absolute floor 0.0001 wins
+        self.assertEqual(adapt.grid_step(coef, "very_fine"), 0.0001)
+        self.assertGreaterEqual(min(adapt.grid_step(CATALOG[p].param(n), "very_fine")
+                                    for p in FAMILY_PATHS for n, _v in CATALOG[p].defaults().items()
+                                    if CATALOG[p].param(n).kind == "float" and CATALOG[p].param(n).step),
+                                0.0001)
+
+    def test_fine_steps_are_smaller_than_normal_ones(self) -> None:
+        latency = CATALOG[HAWKU].param("Latency")
+        move = adapt.FAMILIES[HAWKU]["motion"][0][0]
+        sizes = [adapt.move_value(latency, move, 4.0, +1, 1.0, x) - 4.0 for x in adapt.STEP_LEVELS]
+        self.assertEqual([round(s, 6) for s in sizes], [1.0, 0.4, 0.2])          # Hawku 4 ms -> 5 / 4.4 / 4.2
+        down = [4.0 - adapt.move_value(latency, move, 4.0, -1, 1.0, x) for x in adapt.STEP_LEVELS]
+        self.assertGreater(down[0], down[1])
+        self.assertGreater(down[1], down[2])
+        for path in FAMILY_PATHS:
+            for intent in (Intent.SMOOTHER, Intent.RESPONSIVE, Intent.PRECISE, Intent.LOOSER):
+                with self.subTest(path=path, intent=intent):
+                    prof = profile(FilterConfig(path, True, CATALOG[path].defaults()))
+                    deltas = {}
+                    for level in adapt.STEP_LEVELS:
+                        _, after, _ = run_level(prof, [intent], level)
+                        old, new = prof.filters[0].settings, after.filters[0].settings
+                        deltas[level] = sum(abs(float(new[k]) - float(old[k])) for k in old
+                                            if isinstance(old[k], (int, float)) and not isinstance(old[k], bool))
+                    self.assertLessEqual(deltas["fine"], deltas["normal"] + 1e-9)
+                    self.assertLessEqual(deltas["very_fine"], deltas["fine"] + 1e-9)
+
+    def test_tiny_fine_moves_still_move_one_fine_grid_step(self) -> None:
+        latency = CATALOG[HAWKU].param("Latency")
+        move = adapt.FAMILIES[HAWKU]["motion"][0][0]
+        self.assertAlmostEqual(adapt.move_value(latency, move, 4.0, +1, 0.001, "fine"), 4.1)
+        self.assertAlmostEqual(adapt.move_value(latency, move, 4.0, -1, 0.001, "very_fine"), 3.95)
+
+    def test_ints_stay_ints_and_move_whole_units(self) -> None:
+        nr = FilterConfig(NOISE_REDUCTION, True, CATALOG[NOISE_REDUCTION].defaults())
+        for level in ("fine", "very_fine"):
+            _, prof, _ = run_level(profile(nr), [Intent.SMOOTHER] * 3, level)
+            samples = value(prof, NOISE_REDUCTION, "Samples")
+            self.assertIsInstance(samples, int)
+            self.assertEqual(samples, CATALOG[NOISE_REDUCTION].param("Samples").default + 3)
+
+    def test_fine_runs_stay_in_catalog_and_soft_limits(self) -> None:
+        for level in ("fine", "very_fine"):
+            for path in FAMILY_PATHS:
+                for intent in (Intent.SMOOTHER, Intent.RESPONSIVE, Intent.PRECISE, Intent.LOOSER):
+                    with self.subTest(level=level, path=path, intent=intent):
+                        start = profile(FilterConfig(path, True, CATALOG[path].defaults()))
+                        _, prof, results = run_level(start, [intent] * 150, level)
+                        assert_in_bounds(self, prof)
+                        assert_within_soft_limits(self, start, prof)
+                        self.assertTrue(results[0].reasons)
+            _, prof, _ = run_level(profile(USER_RADIAL), [Intent.SMOOTHER] * 300, level)
+            self.assertLessEqual(value(prof, RADIAL_TABLET, "SmoothingCoefficient"), 0.99)
+
+    def test_values_are_rounded_to_the_fine_grid(self) -> None:
+        _, prof, _ = run_level(profile(USER_RADIAL), [Intent.SMOOTHER, Intent.PRECISE, Intent.RESPONSIVE], "fine")
+        for name in ("OuterRadius", "InnerRadius", "SmoothingCoefficient"):
+            v = value(prof, RADIAL_TABLET, name)
+            grid = adapt.grid_step(CATALOG[RADIAL_TABLET].param(name), "fine")
+            self.assertAlmostEqual(v / grid, round(v / grid), places=6, msg=name)
+            self.assertEqual(v, round(v, 6))
+
+    def test_fine_level_is_deterministic(self) -> None:
+        seq = [Intent.SMOOTHER, Intent.RESPONSIVE, Intent.PRECISE, Intent.AREA_BIGGER, Intent.SMOOTHER]
+        self.assertEqual(run_level(profile(USER_RADIAL), seq, "very_fine")[:2],
+                         run_level(profile(USER_RADIAL), seq, "very_fine")[:2])
+
+    def test_fine_convergence_uses_the_same_gain_rule(self) -> None:
+        seq = [Intent.SMOOTHER, Intent.SMOOTHER] + [Intent.RESPONSIVE, Intent.SMOOTHER] * 3
+        normal, _, _ = run_level(profile(USER_RADIAL), seq, "normal")
+        for level in ("fine", "very_fine"):
+            state, _, results = run_level(profile(USER_RADIAL), seq, level)
+            self.assertTrue(results[-1].converged, level)
+            self.assertEqual(state.axis("motion").gain, normal.axis("motion").gain)   # level multiplies, not replaces
+            self.assertIn("adapt.converged", [r.key for r in results[-1].reasons])
+            self.assertLess(abs(state.axis("motion").position), abs(normal.axis("motion").position) + 1e-9)
+
+    def test_area_fine_steps(self) -> None:
+        for level, pct in (("normal", 2.0), ("fine", 1.0), ("very_fine", 0.5)):
+            rect, reasons = adapt.nudge_area(USER_AREA, CTL472, +1, 1.0, level)
+            self.assertAlmostEqual(rect.width, round(71.66 * (1 + pct / 100), 3), places=3)
+            self.assertAlmostEqual(rect.width / rect.height, 71.66 / 41.44, places=3)
+            self.assertEqual((rect.x, rect.y, rect.rotation), (USER_AREA.x, USER_AREA.y, 180.0))
+        _, prof, results = run_level(profile(USER_RADIAL), [Intent.AREA_BIGGER, Intent.AREA_SMALLER] * 3, "fine")
+        self.assertTrue(adapt.axis_converged(results[-1].state.axis("area")))
+
+
 class PollTest(unittest.TestCase):
     def test_mapping(self) -> None:
         self.assertEqual(adapt.poll_to_intents("shaky", "jittery"), (Intent.SMOOTHER, Intent.PRECISE))

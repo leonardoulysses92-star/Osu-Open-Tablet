@@ -194,6 +194,16 @@ class TunerUndoBoundsTest(unittest.TestCase):
         self.assertEqual(radial(sender.calls[0])["SmoothingCoefficient"], 0.0001)
         self.assertEqual({r.key for r in res.reasons}, {"livetune.clamped"})
 
+    def test_fine_step_values_are_not_snapped_back_to_the_coarse_grid(self) -> None:
+        tuner, sender, _ = make_tuner()
+        res = tuner.propose(radial_change(OuterRadius=0.62, SmoothingCoefficient=0.8846))
+        self.assertTrue(res.accepted)
+        self.assertEqual(radial(sender.calls[0])["OuterRadius"], 0.62)          # catalog step 0.05
+        self.assertEqual(radial(sender.calls[0])["SmoothingCoefficient"], 0.8846)
+        tuner, sender, _ = make_tuner()
+        tuner.propose(radial_change(OuterRadius=0.6234))                       # finest grid: 0.05 / 10
+        self.assertEqual(radial(sender.calls[0])["OuterRadius"], 0.625)
+
     def test_untouched_user_values_outside_bounds_are_kept(self) -> None:
         settings = user_settings()
         prof = settings["Profiles"][0]

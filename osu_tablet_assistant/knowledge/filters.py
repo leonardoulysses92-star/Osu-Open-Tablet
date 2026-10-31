@@ -19,6 +19,15 @@ KINDS = ("float", "int", "bool", "enum")
 # Inside a stage OTD keeps the order of the profile's Filters list.
 STAGES = ("raw", "pre", "post")
 CONFIDENCES = ("high", "medium", "low")
+# Finer grids for live fine-tuning (``engine.adapt`` step levels): catalog step / divisor, never below
+# GRID_FLOOR. FINEST_GRID_DIVISOR is the finest grid any automatic move may use (``otd.livetune`` checks it).
+GRID_FLOOR = 0.0001
+FINEST_GRID_DIVISOR = 10
+
+
+def grid_decimals(grid: float) -> int:
+    """Decimals that show a value on ``grid`` exactly (0.5 -> 1, 0.05 -> 2, 0.002 -> 3)."""
+    return max(0, -math.floor(math.log10(grid) + 1e-9)) if grid > 0 else 6
 
 
 @dataclass(frozen=True)
@@ -33,8 +42,21 @@ class FilterParam:
     unit: str = ""
     choices: tuple[str, ...] = ()        # only for kind == "enum"
 
-    def clamp(self, value: Any) -> Any:
-        """Coerce ``value`` to this param's type, bounds and step grid."""
+    def grid(self, divisor: float = 1) -> float | None:
+        """Grid for automatic moves: the catalog step divided by ``divisor`` (1 = the catalog step).
+
+        Ints keep whole steps (at least 1). Floats never go below :data:`GRID_FLOOR` (or the catalog
+        step when that is already finer). None when the param has no grid.
+        """
+        if self.kind == "int":
+            return float(max(1, round(self.step or 1)))
+        if self.kind != "float" or not self.step:
+            return None
+        fine = self.step / max(float(divisor), 1.0)
+        return float(f"{max(fine, min(self.step, GRID_FLOOR)):.6g}")
+
+    def clamp(self, value: Any, grid: float | None = None) -> Any:
+        """Coerce ``value`` to this param's type, bounds and step grid (``grid`` overrides the catalog step)."""
         if self.kind == "bool":
             return bool(value)
         if self.kind == "enum":
@@ -45,8 +67,11 @@ class FilterParam:
             return self.default
         if not math.isfinite(number):
             return self.default
-        if self.step:   # grid of multiples of step; bounds win over the grid
-            number = round(number / self.step) * self.step
+        step = self.step if grid is None else grid
+        if step:   # grid of multiples of step; bounds win over the grid
+            number = round(number / step) * step
+            if grid is not None:
+                number = round(number, grid_decimals(step))
         if self.min is not None:
             number = max(number, self.min)
         if self.max is not None:
