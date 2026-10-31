@@ -19,7 +19,7 @@ from __future__ import annotations
 import math
 import statistics
 from dataclasses import dataclass, fields, replace
-from typing import Mapping, Sequence
+from typing import Sequence
 
 from ..models import CandidateResult, MetricsReport, UserPreferences
 

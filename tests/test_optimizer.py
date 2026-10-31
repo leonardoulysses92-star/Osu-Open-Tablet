@@ -1,7 +1,6 @@
 """engine.optimizer: cost, stop rule, one-change proposals and closed-loop convergence on a simulated player."""
 from __future__ import annotations
 
-import math
 import statistics
 import unittest
 from dataclasses import replace
@@ -11,7 +10,7 @@ from osu_tablet_assistant.engine import playobserve as po
 from osu_tablet_assistant.engine.playtypes import (IMPROVING, INSUFFICIENT, PLATEAU, START, WORSE, FeelFit,
                                                     PlayReport, ReachFit, RoundRecord)
 from osu_tablet_assistant.models import FilterConfig, Priority, ProfileInfo, Rect, UserPreferences
-from playsim import AREA, DISPLAY, TABLET, Player, make_map, simulate
+from playsim import AREA, TABLET, Player, make_map, simulate
 
 MAP = make_map(seed=11, n=90, gap_ms=320.0)
 IDEAL = Rect(64.0, 37.0, 78.0, 49.0, 180.0)      # the area this simulated hand "wants"
@@ -209,7 +208,7 @@ class ClosedLoopTests(unittest.TestCase):
     MAX_ROUNDS = 14
 
     def run_loop(self, seed: int) -> tuple[list[float], list[str], Rect]:
-        state, area, kind, move, change, adapt_state = opt.new_state(), AREA, "start", (0.0, 0.0), (), None
+        state, area, kind, move, change = opt.new_state(), AREA, "start", (0.0, 0.0), ()
         costs, kinds = [], []
         for n in range(self.MAX_ROUNDS):
             report = play(area, 1000 * seed + n)

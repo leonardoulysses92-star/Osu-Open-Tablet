@@ -211,6 +211,12 @@ def record_round(state: OptimizerState, report: PlayReport, area: Rect, filters:
     return new, replace(report, cost=cost, cost_ci=ci)
 
 
+def mark_undone(state: OptimizerState, kind: str, move: tuple[float, float]) -> OptimizerState:
+    """The player undid a change: never propose that movement again right away."""
+    entry = (kind, _sign(move[0]), _sign(move[1]))
+    return replace(state, undone=(state.undone + (entry,))[-UNDO_MEMORY:])
+
+
 # ------------------------------------------------------------ convergence
 def _gain(prev: RoundRecord, cur: RoundRecord) -> float:
     return (prev.cost - cur.cost) / prev.cost if prev.cost > 1e-9 else 0.0

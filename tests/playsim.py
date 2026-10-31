@@ -5,7 +5,6 @@ lag, jitter and timing noise, so tests can check what the analysis recovers.
 """
 from __future__ import annotations
 
-import math
 import random
 from dataclasses import dataclass
 

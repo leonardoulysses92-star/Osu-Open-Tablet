@@ -1,0 +1,507 @@
+"""Play Coach: tune area and filters from a real play, round after round.
+
+Flow (see docs/PLAY_COACH.md): **prepare** (is osu! open, which map) -> **observe** (the player plays; the
+cursor and the click keys are recorded and judged live) -> **report** (what went wrong, ONE proposed change,
+apply and play again) -> repeat until the gain is practically nil.
+
+* :class:`CoachCore` has all the logic and no Tk, so it is fully testable with fakes.
+* :class:`CoachWindow` is the Tk front-end: a normal window for prepare/report that shrinks to a small
+  always-on-top one while observing, plus an optional click-through mini-map in a screen corner.
+
+Integration (same shape as the companion)::
+
+    from osu_tablet_assistant.gui.coach import open_coach
+    open_coach(root, session, on_keep=callback)
+
+Honest limits: the coach reads the OS cursor and ONLY the configured click keys; it does not read
+osu!'s memory, so hits and misses are inferred (see ``engine.playobserve``).
+"""
+from __future__ import annotations
+
+import queue
+import threading
+import time
+import tkinter as tk
+from tkinter import filedialog, messagebox, ttk
+from typing import Any, Callable
+
+from ..appconfig import app_data_dir
+from ..engine import adapt, optimizer as opt
+from ..engine.playtypes import PlayReport
+from ..models import Reason
+from ..otd.livetune import LiveTuner, controller_sender, dry_run_sender
+from . import hotkeys as hk
+from .coachcore import (ANALYSIS_EVERY_S, PHASES, CoachCore, CoachFeedback, Readiness, RoundResult, Translate, say)
+from .companion import companion_args_from_session, make_click_through
+from .i18n import t as default_t
+from .tabletmap import TabletMap
+from .widgets import COLORS, Card, Chip, Expander, Notice, WrapLabel, apply_theme, bullets, button, check, frame, label, px
+
+TICK_MS = 100
+COACH_HOTKEY = "ctrl+alt+p"
+
+__all__ = ["CoachCore", "CoachWindow", "MiniMap", "Readiness", "RoundResult", "open_coach", "say"]
+
+
+# --------------------------------------------------------------------------
+# Window
+# --------------------------------------------------------------------------
+class MiniMap:
+    """Optional click-through map in a corner of the screen (hidden by exclusive full screen)."""
+
+    SIZE = (220, 130)
+
+    def __init__(self, master: tk.Misc, core: CoachCore) -> None:
+        self.win = tk.Toplevel(master)
+        self.win.overrideredirect(True)
+        self.win.attributes("-topmost", True)
+        try:
+            self.win.attributes("-alpha", 0.85)
+        except tk.TclError:
+            pass
+        w, h = px(master, self.SIZE[0]), px(master, self.SIZE[1])
+        x = self.win.winfo_screenwidth() - w - px(master, 16)
+        self.win.geometry(f"{w}x{h}+{x}+{px(master, 16)}")
+        self.map = TabletMap(self.win, height=self.SIZE[1], compact=True)
+        self.map.pack(fill="both", expand=True)
+        self.map.set_setup(core.tablet, core.area, core.display)
+        make_click_through(self.win)
+
+    def destroy(self) -> None:
+        try:
+            self.win.destroy()
+        except tk.TclError:
+            pass
+
+
+class CoachWindow:
+    """The Play Coach window. Every OS-facing dependency can be injected through ``core``."""
+
+    def __init__(self, parent: tk.Misc | None, session: Any = None, *, core: CoachCore | None = None,
+                 translate: Translate | None = None, on_keep: Callable[[dict], None] | None = None,
+                 on_close: Callable[[], None] | None = None, enable_hotkeys: bool = True,
+                 hotkey_backend: hk.HotkeyBackend | None = None, beeper: hk.Beeper | None = None,
+                 **core_kwargs: Any) -> None:
+        self.t: Translate = translate or default_t
+        self.on_keep, self.on_close = on_keep, on_close
+        self.core = core if core is not None else self._core_from_session(session, **core_kwargs)
+        self.beeper = beeper if beeper is not None else hk.Beeper()
+        self._actions: queue.Queue[str] = queue.Queue()
+        self.hotkeys = hk.HotkeyManager({"coach_toggle": COACH_HOTKEY}, self._actions.put,
+                                        backend=hotkey_backend, use_default_backend=hotkey_backend is None)
+        self._results: queue.Queue[PlayReport | None] = queue.Queue()
+        self._analyzing = False
+        self._last_analysis = 0.0
+        self._closed = False
+        self._job: str | None = None
+        self.mini: MiniMap | None = None
+        self.own_root = parent is None
+        self.root = tk.Tk() if parent is None else tk.Toplevel(parent)
+        if parent is None:
+            apply_theme(self.root)
+        self.root.title(self.t("play.title"))
+        self.root.configure(bg=COLORS.bg)
+        self.root.protocol("WM_DELETE_WINDOW", self.close)
+        self._geometry_before_observe: str | None = None
+        self.body: ttk.Frame | None = None
+        self.map: TabletMap | None = None
+        self.status = Notice(self.root)
+        self.show_phase("prepare")
+        if enable_hotkeys and self.hotkeys.available:
+            self.hotkeys.start()
+        self._job = self.root.after(TICK_MS, self._tick)
+
+    # ------------------------------------------------------------- construction
+    def _core_from_session(self, session: Any, **kwargs: Any) -> CoachCore:
+        args = companion_args_from_session(session) if session is not None else {}
+        settings, name = args.get("settings"), args.get("tablet_name")
+        if settings is None or not name:
+            raise ValueError("CoachWindow needs a session (or a core)")
+        dry_run, controller = bool(args.get("dry_run")), args.get("controller")
+        sender = dry_run_sender if dry_run or controller is None else controller_sender(controller)
+        tuner = LiveTuner(settings, name, sender, config_dir=args.get("config_dir"), tablet=args.get("tablet"),
+                          can_keep=not dry_run)
+        display = args.get("display")
+        if display is None:
+            raise ValueError("CoachWindow needs the display of the session")
+        prefs = getattr(session, "prefs", None)
+        policy = adapt.TuningPolicy(adapt.PolicyMode(getattr(getattr(prefs, "plugin_policy", None), "value",
+                                                              "tune_only")),
+                                    frozenset(args.get("available_filters", ())))
+        cache = app_data_dir() / "beatmap_index.json"
+        return CoachCore(tuner, args.get("tablet"), display, prefs=prefs, policy=policy, cache_path=cache,
+                         **kwargs)
+
+    # ----------------------------------------------------------------- phases
+    def show_phase(self, phase: str) -> None:
+        core = self.core
+        core.phase = phase
+        if self.body is not None:
+            self.body.destroy()
+        self.body = ttk.Frame(self.root, padding=px(self.root, 16))
+        self.body.pack(fill="both", expand=True)
+        self.map = None
+        compact = phase == "observe"
+        self._set_window_mode(compact)
+        {"prepare": self._build_prepare, "observe": self._build_observe, "report": self._build_report}[phase]()
+
+    def _set_window_mode(self, compact: bool) -> None:
+        root = self.root
+        if compact:
+            if self._geometry_before_observe is None:
+                self._geometry_before_observe = root.geometry()
+            root.attributes("-topmost", True)
+            root.minsize(px(root, 320), px(root, 300))
+            root.geometry(f"{px(root, 360)}x{px(root, 380)}")
+        else:
+            root.attributes("-topmost", False)
+            root.minsize(px(root, 560), px(root, 560))
+            if self._geometry_before_observe is not None:
+                root.geometry(self._geometry_before_observe)
+                self._geometry_before_observe = None
+            elif not root.winfo_viewable():
+                root.geometry(f"{px(root, 640)}x{px(root, 680)}")
+
+    def _say(self, reason: Reason) -> str:
+        return say(reason, self.t)
+
+    def _title_block(self, title_key: str, subtitle_key: str | None = None) -> None:
+        label(self.body, self.t(title_key), "Title").pack(anchor="w")
+        if subtitle_key:
+            WrapLabel(self.body, self.t(subtitle_key), "Muted").pack(fill="x", pady=(px(self.root, 2), px(self.root, 10)))
+        self._steps()
+
+    def _steps(self) -> None:
+        names = ["play.step.prepare", "play.step.play", "play.step.result"]
+        index = PHASES.index(self.core.phase)
+        row = frame(self.body)
+        row.pack(fill="x", pady=(0, px(self.root, 10)))
+        for i, key in enumerate(names):
+            Chip(row, f"{i + 1}  {self.t(key)}", "accent" if i == index else "neutral").pack(
+                side="left", padx=(0, px(self.root, 6)))
+
+    # -- prepare
+    def _build_prepare(self) -> None:
+        core = self.core
+        self._title_block("play.title", "play.prepare.intro")
+        ready = core.readiness()
+        card = Card(self.body, self.t("play.prepare.check_title"))
+        card.pack(fill="x", pady=(0, px(self.root, 8)))
+        self._check_row(card.body, ready.osu_running, self.t("play.prepare.osu_open"))
+        self._check_row(card.body, ready.beatmap is not None,
+                        ready.beatmap.display_name if ready.beatmap else self.t("play.prepare.map_missing"))
+        if ready.beatmap is None:
+            row = frame(card.body)
+            row.pack(fill="x", pady=(px(self.root, 4), 0))
+            button(row, self.t("play.prepare.pick_map"), self._pick_map, kind="ghost").pack(side="left")
+        for issue in ready.issues:
+            WrapLabel(card.body, "• " + self._say(issue), "Small").pack(fill="x")
+        self.map = TabletMap(self.body, height=190)
+        self.map.pack(fill="x", pady=(0, px(self.root, 8)))
+        self.map.set_setup(core.tablet, core.area, core.display)
+        WrapLabel(self.body, self.t("play.prepare.honest"), "Small").pack(fill="x", pady=(0, px(self.root, 10)))
+        if core.result is None and core.state.rounds:
+            WrapLabel(self.body, self._progress_text(), "Muted").pack(fill="x", pady=(0, px(self.root, 6)))
+        actions = frame(self.body)
+        actions.pack(fill="x")
+        start = button(actions, self.t("play.prepare.start"), self.start_observing, kind="primary")
+        start.pack(side="left")
+        start.configure(state="normal" if ready.can_start else "disabled")
+        if self.hotkeys.available:
+            label(actions, self.t("play.prepare.hotkey", key=COACH_HOTKEY.replace("+", " + ").title()), "Small").pack(
+                side="left", padx=(px(self.root, 12), 0))
+        self._mini_var = tk.BooleanVar(value=self.mini is not None)
+        adv = Expander(self.body, self.t("play.prepare.options"), height=4)
+        adv.pack(fill="x", pady=(px(self.root, 10), 0))
+        adv.set(self.t("play.prepare.options_text", keys=", ".join(core.keys)))
+        check(self.body, self.t("play.prepare.minimap"), self._mini_var, command=self._toggle_mini).pack(
+            anchor="w", pady=(px(self.root, 2), 0))
+        WrapLabel(self.body, self.t("play.prepare.minimap_note"), "Small").pack(fill="x")
+        self.status = Notice(self.body)
+        self.status.pack(fill="x", pady=(px(self.root, 8), 0))
+        if core.state.rounds:
+            self._build_progress_strip(self.body)
+            self._build_keep_row(self.body)
+
+    def _check_row(self, parent: tk.Misc, ok: bool, text: str) -> None:
+        row = frame(parent)
+        row.pack(fill="x", pady=1)
+        label(row, "✓" if ok else "✕", "Good" if ok else "Warn").pack(side="left")
+        label(row, text, "Body").pack(side="left", padx=(px(self.root, 8), 0))
+
+    def _pick_map(self) -> None:
+        path = filedialog.askopenfilename(parent=self.root, title=self.t("play.prepare.pick_map"),
+                                          filetypes=[("osu! beatmap", "*.osu"), ("*", "*")])
+        if path and not self.core.set_beatmap_file(path):
+            messagebox.showerror(self.t("play.title"), self.t("play.prepare.map_unreadable"), parent=self.root)
+        self.show_phase("prepare")
+
+    def _toggle_mini(self) -> None:
+        if self._mini_var.get() and self.mini is None:
+            self.mini = MiniMap(self.root, self.core)
+        elif not self._mini_var.get() and self.mini is not None:
+            self.mini.destroy()
+            self.mini = None
+
+    # -- observe
+    def start_observing(self) -> None:
+        if self.core.phase == "observe" or not self.core.readiness(refresh=False).can_start:
+            return
+        if not self.core.start():
+            return
+        self._last_analysis = time.monotonic()
+        self._analyzing = False
+        self.show_phase("observe")
+        self.beeper.play("converged")
+
+    def _build_observe(self) -> None:
+        self._observe_var = tk.StringVar(value=self.t("play.observe.searching"))
+        label(self.body, self.t("play.observe.title"), "Heading").pack(anchor="w")
+        self.map = TabletMap(self.body, height=200, compact=False)
+        self.map.pack(fill="both", expand=True)
+        self.map.set_setup(self.core.tablet, self.core.area, self.core.display)
+        ttk.Label(self.body, textvariable=self._observe_var, wraplength=px(self.root, 320)).pack(
+            fill="x", pady=(px(self.root, 6), px(self.root, 6)))
+        button(self.body, self.t("play.observe.stop"), self.stop_observing, kind="primary").pack(anchor="w")
+
+    def stop_observing(self) -> None:
+        if self.core.phase != "observe":
+            return
+        self.core.finish()
+        self.show_phase("report")
+        self.root.lift()
+
+    # -- report
+    def _build_report(self) -> None:
+        core, result = self.core, self.core.result
+        assert result is not None
+        report, proposal = result.report, result.proposal
+        self._title_block("play.report.title")
+        self.map = TabletMap(self.body, height=190)
+        self.map.pack(fill="x", pady=(0, px(self.root, 6)))
+        self.map.set_setup(core.tablet, core.area, core.display)
+        self.map.set_cells(report.cells)
+        self.map.add_results(report.results, report.radius_mm)
+        card = Card(self.body, self.t("play.report.found_title"))
+        card.pack(fill="x", pady=(0, px(self.root, 8)))
+        bullets(card.body, [self._say(r) for r in result.findings[:4]]).pack(fill="x")
+        if proposal.kind != "none":
+            card = Card(self.body, self.t("play.report.change_title"), accent=COLORS.accent)
+            card.pack(fill="x", pady=(0, px(self.root, 8)))
+            WrapLabel(card.body, self._say(proposal.message) if proposal.message else "", "Strong").pack(fill="x")
+            bullets(card.body, [self._say(r) for r in proposal.reasons[:3]], role="Small").pack(fill="x")
+            WrapLabel(card.body, self.t("play.report.live_note"), "Small").pack(fill="x", pady=(px(self.root, 4), 0))
+        elif proposal.message:
+            WrapLabel(self.body, self._say(proposal.message), "Muted").pack(fill="x", pady=(0, px(self.root, 8)))
+        self._build_progress_strip(self.body)
+        WrapLabel(self.body, self._say(result.convergence.message), "Strong").pack(fill="x", pady=(0, px(self.root, 8)))
+        done = proposal.kind == "none"
+        actions = frame(self.body)
+        actions.pack(fill="x")
+        if done and proposal.verdict == opt.PLATEAU:
+            button(actions, self.t("play.report.keep"), self.keep, kind="primary").pack(side="left")
+            button(actions, self.t("play.report.play_again"), self.play_again, kind="secondary").pack(
+                side="left", padx=(px(self.root, 8), 0))
+        elif done:
+            button(actions, self.t("play.report.play_again"), self.play_again, kind="primary").pack(side="left")
+        else:
+            button(actions, self.t("play.report.apply"), self.apply, kind="primary").pack(side="left")
+            button(actions, self.t("play.report.skip"), self.skip, kind="secondary").pack(
+                side="left", padx=(px(self.root, 8), 0))
+        self.status = Notice(self.body)
+        self.status.pack(fill="x", pady=(px(self.root, 8), 0))
+        row = frame(self.body)
+        row.pack(fill="x", pady=(px(self.root, 4), 0))
+        undo = button(row, self.t("play.report.undo"), self.undo, kind="ghost")
+        undo.pack(side="left")
+        undo.configure(state="normal" if core.tuner.can_undo else "disabled")
+        if not (done and proposal.verdict == opt.PLATEAU):
+            self._build_keep_row(self.body, only_restore=False)
+        else:
+            button(row, self.t("play.report.restore"), self.restore, kind="ghost").pack(side="left")
+        tech = Expander(self.body, self.t("gui.details.title"), height=8)
+        tech.pack(fill="x", pady=(px(self.root, 6), 0))
+        tech.set(self._technical_text(report, result))
+
+    def _build_progress_strip(self, parent: tk.Misc) -> None:
+        marks = self.core.marks()
+        if not marks:
+            return
+        row = frame(parent)
+        row.pack(fill="x", pady=(px(self.root, 2), px(self.root, 6)))
+        label(row, self.t("play.progress.title"), "Small").pack(side="left", padx=(0, px(self.root, 8)))
+        kinds = {"start": "neutral", "better": "success", "same": "neutral", "worse": "warn", "unclear": "neutral"}
+        for i, mark in enumerate(marks):
+            Chip(row, f"{i + 1} · {self.t(f'play.mark.{mark}')}", kinds[mark]).pack(side="left", padx=(0, 4))
+
+    def _build_keep_row(self, parent: tk.Misc, only_restore: bool = False) -> None:
+        row = frame(parent)
+        row.pack(fill="x", pady=(px(self.root, 4), 0))
+        if not only_restore and self.core.dirty:
+            button(row, self.t("play.report.keep"), self.keep, kind="secondary").pack(side="left")
+        button(row, self.t("play.report.restore"), self.restore, kind="ghost").pack(
+            side="left", padx=(px(self.root, 8), 0))
+
+    def _progress_text(self) -> str:
+        return self.t("play.progress.rounds", n=len(self.core.state.rounds))
+
+    def _technical_text(self, report: PlayReport, result: RoundResult) -> str:
+        a = report.alignment
+        lines = [self.t("play.tech.alignment", quality=f"{a.quality:.2f}", matched=a.matched, scale=f"{a.time_scale:g}",
+                        flip="HR" if a.flip_y else "-", offset=f"{a.offset_ms:.0f}", spread=f"{a.spread_ms:.0f}"),
+                 self.t("play.tech.judged", n=report.n_judged, total=report.n_objects,
+                        miss=f"{report.miss_rate * 100:.0f}")]
+        if report.reach is not None:
+            r = report.reach
+            lines.append(self.t("play.tech.reach", gx=f"{r.gain_x:.3f}", gy=f"{r.gain_y:.3f}",
+                                bx=f"{r.bias_x_mm:.2f}", by=f"{r.bias_y_mm:.2f}", n=r.n))
+        if report.cost is not None:
+            lines.append(self.t("play.tech.cost", cost=f"{report.cost:.3f}",
+                                lo=f"{report.cost_ci[0]:.3f}" if report.cost_ci else "-",
+                                hi=f"{report.cost_ci[1]:.3f}" if report.cost_ci else "-"))
+        lines += [self._say(w) for w in report.warnings]
+        lines += [self._say(r) for r in result.proposal.reasons]
+        return "\n".join(lines)
+
+    # -- actions
+    def play_again(self) -> None:
+        self.core.result = None
+        self.show_phase("prepare")
+
+    def _notify(self, fb: CoachFeedback) -> None:
+        if fb.message is not None:
+            kind = "success" if fb.ok else "error"
+            text = self._say(fb.message) + (" " + self.t("play.msg.live_only") if fb.live_only and fb.ok else "")
+            self.status.show(text, kind)
+        self.beeper.play(fb.sound)
+
+    def apply(self) -> None:
+        fb = self.core.apply_proposal()
+        if fb.ok:
+            self.show_phase("prepare")
+        self._notify(fb)
+
+    def skip(self) -> None:
+        self.core.skip_proposal()
+        self.show_phase("prepare")
+
+    def undo(self) -> None:
+        fb = self.core.undo_last()
+        self._notify(fb)
+
+    def restore(self) -> None:
+        if not messagebox.askyesno(self.t("play.title"), self.t("play.restore.confirm"), parent=self.root):
+            return
+        fb = self.core.restore_original()
+        self.show_phase("prepare")
+        self._notify(fb)
+
+    def keep(self) -> None:
+        fb = self.core.keep()
+        self._notify(fb)
+        if fb.ok and self.on_keep is not None:
+            self.on_keep(self.core.tuner.settings)
+
+    # ------------------------------------------------------------------- loop
+    def _tick(self) -> None:
+        if self._closed:
+            return
+        try:
+            self._handle_actions()
+            if self.core.phase == "observe":
+                self._tick_observe()
+        finally:
+            if not self._closed:
+                self._job = self.root.after(TICK_MS, self._tick)
+
+    def _handle_actions(self) -> None:
+        while True:
+            try:
+                action = self._actions.get_nowait()
+            except queue.Empty:
+                return
+            if action == "coach_toggle":
+                if self.core.phase == "observe":
+                    self.stop_observing()
+                elif self.core.phase == "prepare":
+                    self.start_observing()
+
+    def _tick_observe(self) -> None:
+        core = self.core
+        view = core.live_view()
+        if view is not None:
+            targets = [self.map] + ([self.mini.map] if self.mini is not None else [])
+            for m in targets:
+                if m is not None:
+                    m.update_pen(view.trail)
+        try:
+            while True:
+                report = self._results.get_nowait()
+                self._analyzing = False
+                if report is not None and self.map is not None:
+                    self.map.add_results(report.results, report.radius_mm)
+                    if self.mini is not None:
+                        self.mini.map.add_results(report.results, report.radius_mm)
+        except queue.Empty:
+            pass
+        if view is not None:
+            text = self.t("play.observe.searching") if core.searching() else self.t(
+                "play.observe.running", clicks=view.clicks)
+            self._observe_var.set(text)
+        now = time.monotonic()
+        if not self._analyzing and now - self._last_analysis >= ANALYSIS_EVERY_S:
+            self._analyzing, self._last_analysis = True, now
+            threading.Thread(target=self._analysis_worker, name="CoachAnalysis", daemon=True).start()
+        if core.should_auto_stop():
+            self.stop_observing()
+
+    def _analysis_worker(self) -> None:
+        try:
+            report = self.core.analyze_live()
+        except Exception:
+            report = None
+        self._results.put(report)
+
+    # ----------------------------------------------------------------- closing
+    def close(self) -> None:
+        if self.core.dirty and self.core.tuner.can_keep:
+            answer = messagebox.askyesnocancel(self.t("play.close.title"), self.t("play.close.body"), parent=self.root)
+            if answer is None:
+                return
+            if answer:
+                fb = self.core.keep()
+                self._notify(fb)
+                if not fb.ok:
+                    return
+                if self.on_keep is not None:
+                    self.on_keep(self.core.tuner.settings)
+            else:
+                self.core.tuner.revert_all()
+                self.core.tuner.flush()
+        self.destroy()
+
+    def destroy(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        if self._job is not None:
+            try:
+                self.root.after_cancel(self._job)
+            except tk.TclError:
+                pass
+        self.hotkeys.stop()
+        self.core.stop_recording()
+        self.beeper.close()
+        if self.mini is not None:
+            self.mini.destroy()
+        try:
+            self.root.destroy()
+        except tk.TclError:
+            pass
+        if self.on_close is not None:
+            self.on_close()
+
+
+def open_coach(parent: tk.Misc | None, session: Any = None, **kwargs: Any) -> CoachWindow:
+    """Open the Play Coach window on a wizard session (see the module docstring)."""
+    return CoachWindow(parent, session, **kwargs)
