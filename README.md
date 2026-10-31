@@ -2,190 +2,203 @@
 
 # osu! Tablet Assistant (osu-open-tablet)
 
-Asistente guiado para jugadores de osu! que te ayuda a configurar [OpenTabletDriver](https://opentabletdriver.net) (OTD): el tamaño y la proporción del área de la tableta, y los filtros de suavizado. Funciona con cualquier tableta que OTD soporte. Mide tu tableta con pruebas cortas en vivo, compara el resultado con configuraciones publicadas por jugadores top y la comunidad (con sus fuentes) y explica cada recomendación.
+Asistente guiado para jugadores de osu! que te ayuda a configurar [OpenTabletDriver](https://opentabletdriver.net) (OTD): el tamaño y la proporción del área de la tableta, y los filtros de suavizado. Funciona con cualquier tableta que OTD soporte. Mide tu tableta con pruebas cortas en vivo y explica cada recomendación, para que entiendas por qué se sugiere cada cosa.
 
 ## Qué hace
 
-El asistente te lleva por estos pasos:
+El asistente te lleva por ocho pasos, en este orden:
 
 | # | Paso (nombre en la app) | Qué pasa |
 |---|---|---|
-| 1 | Bienvenida | Lees el aviso y lo aceptas. Aquí también ves el estado de los datos de la comunidad y el botón "Actualizar datos de la comunidad". |
-| 2 | OpenTabletDriver | Busca las carpetas de configuración y del programa de OTD (instalado o **portable**), lee tus perfiles y plugins y te avisa si tu OTD es anterior a la 0.6.8.1. |
+| 1 | Bienvenida | Lees el aviso y lo aceptas con "Lo entiendo". |
+| 2 | OpenTabletDriver | Busca la carpeta de configuración y de programa de OTD, y lee tus perfiles y plugins. |
 | 3 | Tableta | Eliges tu perfil de OTD, una tableta de la lista o escribes los datos de la tuya. |
-| 4 | Pantalla | Detecta el tamaño del monitor principal. Lo confirmas o escribes los valores. |
-| 5 | Sobre ti | Estilo de juego, tipo de mapas, prioridad, nivel, temblor o retraso, y **qué plugins puede usar el asistente** (ver "Política de plugins"). |
-| 5b | Preset de partida | Solo si hay configuraciones de la comunidad utilizables: eliges una como punto de partida (opcional). |
-| 6 | Punto de partida | Dos pruebas cortas (tasa de reporte y estabilidad) con tu configuración actual. |
-| 7 | Probar ajustes | Aplica cada opción a OTD, la mide (estabilidad, seguimiento, puntería) y te deja puntuarla de 1 a 5. Puedes refinar la mejor. |
-| 8 | Resultado | La configuración recomendada, los motivos, las mediciones, la **comparación con configuraciones de la comunidad** y, si lo permites, **plugins que podrías probar**. La guardas en tu carpeta, copias el informe o la aplicas en OTD. |
+| 4 | Pantalla | Detecta el tamaño del monitor principal. Tú confirmas o escribes los valores. |
+| 5 | Sobre ti | Preguntas cortas: estilo de juego, tipo de mapas, prioridad (poca latencia o más suavidad), nivel, y si notas temblor o retraso. |
+| 6 | Punto de partida | Dos pruebas (tasa de informes y estabilidad) con tu configuración actual. |
+| 7 | Probar ajustes | Aplica cada opción a OTD, la mide con las pruebas de quietud, seguimiento y puntería, y te deja calificarla del 1 al 5. Puedes refinar la mejor. |
+| 8 | Resultado | Muestra la configuración recomendada, sus razones y las mediciones. Puedes guardarla como preset, copiar el informe o aplicarla en OTD. |
 
 **Lo que no hace:**
 
-- No garantiza el mejor ajuste posible. Da puntos de partida medidos y explicables.
-- Los valores de la comunidad no son "lo mejor": son un candidato más, que se mide como los demás y solo gana si te mide mejor a ti.
-- No cambia nada sin tu confirmación y **nunca instala plugins** (solo te dice cuál, por qué, dónde encontrarlo y cómo instalarlo tú).
-- Nunca activa la predicción por su cuenta (ver "Normas de osu!").
+- No garantiza el mejor ajuste posible. Da puntos de partida medidos y explicables. Cada mano y cada tableta son distintas, así que el ajuste final es tuyo.
+- Los rangos de tamaño de área y los filtros vienen de valores que usa la comunidad de osu!. Son heurísticos y el código los marca así.
+- No cambia nada sin tu confirmación.
+- No instala OTD ni plugins, y no recomienda filtros que no tengas instalados.
 
 ## Requisitos
 
 | Requisito | Detalle |
 |---|---|
-| Sistema | Windows 10 u 11 (el objetivo principal). Linux y macOS, sin garantías. |
-| Python | 3.10 o superior con `tkinter` (biblioteca estándar). No hace falta instalar nada con `pip`. |
-| OpenTabletDriver | 0.6.x, instalado o portable. Se recomienda la **0.6.8.1** o posterior si usas interpoladores en Windows (la 0.6.8.1 corrige un cierre del daemon de la 0.6.8 con filtros asíncronos). Con la 0.6.7 el asistente muestra un aviso; nunca te obliga a actualizar. |
+| Sistema | Windows 10 u 11 (plataforma principal). Linux y macOS son de soporte *best-effort*: el código tiene rutas para ellos, pero el proyecto está pensado para Windows. |
+| Python | 3.10 o superior, con `tkinter` (viene con la biblioteca estándar). No hay que instalar nada con `pip`. Si falta `tkinter`, el programa lo indica y termina. |
+| OpenTabletDriver | 0.6.x instalado. El código se revisó contra el código fuente de OTD 0.6.7. |
 
 ## Cómo ejecutarlo
 
-Doble clic en `run.bat`, o desde una terminal en la carpeta del proyecto:
+Opción 1: haz doble clic en `run.bat`.
+
+Opción 2: desde una terminal, en la carpeta del proyecto:
 
 ```
 py -3 -m osu_tablet_assistant
 ```
 
+Las opciones de línea de comandos son:
+
 | Opción | Qué hace |
 |---|---|
-| `--lang es` o `--lang en` | Idioma de la interfaz. Sin ella se usa el último idioma que elegiste (español la primera vez). |
-| `--config-dir RUTA` | Carpeta de configuración de OTD (la que tiene `settings.json`). |
-| `--install-dir RUTA` | Carpeta del programa OTD (la que tiene el ejecutable Console o Daemon). |
-| `--dry-run` | Nunca aplica nada a OTD. Solo puedes guardar el archivo y el informe. |
+| `--lang es` o `--lang en` | Idioma de la interfaz. Por defecto `es`. También se puede cambiar dentro de la app. |
+| `--config-dir RUTA` | Carpeta de configuración de OTD (la que contiene `settings.json`). Si no la indicas, el asistente la busca. |
+| `--install-dir RUTA` | Carpeta del programa de OTD (la que contiene el ejecutable Console o Daemon). Si no la indicas, el asistente la busca. |
+| `--dry-run` | Modo simulación: nunca aplica nada a OTD. Solo puedes guardar un preset y el informe. |
 
-## Datos de la comunidad y fuentes
-
-`osu_tablet_assistant/knowledge/community_presets.json` reúne **31 configuraciones** (datos del 2026-10-30) de jugadores del top y miembros conocidos de la comunidad: perfiles de osu!, entradas de setup.moe escritas por los propios jugadores, Liquipedia y el foro de osu!. Cada entrada guarda **el enlace a la fuente, la fecha de la fuente (o "sin fecha"), la fecha de consulta y un nivel de confianza** (alta = perfil propio o entrada escrita por el jugador; media = wiki/fuente secundaria o entradas con avisos; baja = de oídas o sin verificar). El método completo está en `docs/research/players.md`.
-
-- Las entradas que parecen erratas o valores sin tocar se **descartaron** (ChocoPafe: radio interior mayor que el exterior; Exxotl: valores por defecto con una zona muerta de 1 mm) o se **marcaron** (por ejemplo "posible errata", "valores del formulario", "antigua", "depende de la tableta"). Las marcas se muestran como avisos.
-- Los valores que aportaste (Radial Follow 0,71 / 0,37 / 0,37 / 0,38 / 0,26, área desconocida) están incluidos como **"tus propios valores", sin verificar, confianza baja y sin atribuirlos a ningún jugador**: la investigación no encontró ninguna fuente pública que los relacione con mrekk.
-- **Adaptación a tu área (heurística):** los radios de Radial Follow son milímetros sobre la tableta. El asistente escala `OuterRadius` por la proporción de anchos y `InnerRadius` por la de altos entre tu área y la de la fuente (así los calcula la popular calculadora de Mixmg, que usa la mayoría del top). `SmoothingCoefficient` solo se escala cuando la entrada tiene la firma de la calculadora (interior = coeficiente). Knee y leak se mantienen. Los valores en píxeles (espacio de pantalla) y en unidades internas de la tableta no se escalan. Si no se conoce el área de la fuente, se usan los valores publicados. Cada ajuste aparece en los motivos.
-- La predicción siempre se desactiva, un valor interno de `Frequency` vuelve a 1000 Hz y los valores fuera de rango se limitan al catálogo (y también se indica).
-- Las 3 configuraciones de la comunidad más parecidas (por tableta, área, confianza y filtros que ya usas) se convierten en candidatas; la que elijas como preset de partida se mide primero.
-- La página de Resultado compara tu resultado con las configuraciones más parecidas: área, tableta y cada valor que difiere, con fuente, fecha y confianza.
-
-## Mantener los datos al día
-
-El botón **"Actualizar datos de la comunidad"** (Bienvenida y Ajustes) descarga un pequeño paquete de la página de GitHub del proyecto (carpeta `data/` de `leonardoulysses92-star/Osu-Open-Tablet`, rama `main`; la dirección se puede cambiar en Ajustes):
-
-- Solo direcciones `https`, con tiempo de espera y tamaño máximo por archivo.
-- `manifest.json` indica el SHA-256 y el tamaño de cada archivo; ambos deben coincidir y los dos archivos deben pasar la misma validación estricta que los datos incluidos. Un catálogo descargado no puede añadir plugins que esta versión no conoce: **son solo datos, nunca código**.
-- Un paquete válido se guarda en `%APPDATA%\OsuOpenTablet\data` y se usa a partir de entonces. Si algo falla, se siguen usando los datos que ya tenías (y como último recurso los incluidos).
-- La pantalla muestra "Última actualización <fecha> · N configuraciones · M fuentes" y avisa cuando los datos tienen más de **90 días**.
-- La comprobación al iniciar está **desactivada** por defecto; actívala en Ajustes si la quieres. No hay telemetría: solo se piden esos tres archivos, sin identificadores.
-
-Para mantenedores: después de cambiar `knowledge/community_presets.json` (sube su `version` y `generated`) o `knowledge/filters.json`, ejecuta `python tools/refresh_data.py` y sube `data/`. Los tests fallan si `data/` no está al día.
-
-## Política de plugins
-
-En "Sobre ti" (y en Ajustes) eliges qué plugins puede usar el asistente:
-
-| Opción | Qué significa |
-|---|---|
-| **Solo ajustar mis filtros actuales** | Tus filtros y su orden se mantienen. Solo cambian sus valores, **de uno en uno**, cada uno mostrado como valor actual -> valor propuesto con el motivo. No hay opción "sin filtros". |
-| **Usar cualquier plugin que ya tenga instalado** (por defecto) | Elige entre los plugins que hay en la carpeta `Plugins` de OTD. |
-| **Sugerir también plugins que aún no tengo** | Como la anterior, y la página de Resultado lista los plugins que te faltan con el motivo, dónde encontrarlos y cómo instalarlos tú. |
-
-Las candidatas, los refinamientos y las configuraciones de la comunidad respetan la política: una configuración de la comunidad que necesita un plugin que no tienes (o, con "solo ajustar", un filtro que no usas) no se prueba.
-
-## Normas de osu! (predicción y asistencia de entrada)
-
-El 2026-10-14 osu! dijo que OTD y los plugins de suavizado / antitemblor están bien, pero que los plugins que asisten la entrada de una forma que "cualquier persona normal consideraría trampa" llevarán a sanciones. No nombró ningún plugin ([tema del foro](https://osu.ppy.sh/community/forums/topics/2254092)). Por eso:
-
-- Los plugins de predicción (Frenet-Serret predictor, ScuffedInter/Extrapolator) y los filtros que no son de suavizado (Hover Distance Limiter, Saturn Area Rounding) **nunca se eligen automáticamente**: solo decides tú, con una nota explicativa.
-- La predicción de Devocub nunca se activa.
-- **No se sabe** si cuenta el ajuste de predicción de Temporal Resampler o Saturn (`frameShift`); cuando una opción lo usa, los motivos lo dicen.
-
-## Dónde se guardan los archivos
-
-En **Ajustes** eliges tu carpeta (por ejemplo `C:\Users\<tú>\Documents\opentablet`, donde vive un OTD portable). Lo que guarda el asistente es un **archivo de configuración completo de OTD**, el mismo formato que un `Osu.json` (`Revision`, `Profiles`, `LockUsableAreaDisplay`, `LockUsableAreaTablet`, `Tools`), que cargas con "Load settings" de OTD.
-
-- Al guardar puedes editar el nombre; por defecto "`<tableta> <fecha hora>`" (la plantilla se cambia en Ajustes).
-- Si el archivo ya existe (por ejemplo `Osu.json`), el asistente pregunta antes y, antes de reemplazarlo, guarda una copia con fecha en `<carpeta>\Backup\`.
-- Si no eliges carpeta, guarda en la carpeta `Presets` de OTD, como antes.
-- Los ajustes del propio asistente (idioma, carpeta, nombre de archivo, política de plugins, actualizaciones) están en `%APPDATA%\OsuOpenTablet\config.json`. Si ese archivo se daña, se usan los valores por defecto y la copia dañada se conserva como `config.corrupt.json`.
-
-**OTD portable:** además de `%LOCALAPPDATA%\OpenTabletDriver`, el asistente reconoce carpetas portables (con `OpenTabletDriver.Daemon.exe` o `convert_to_portable.bat` junto a un archivo de configuración o una carpeta `userdata`). Si encuentra varias, el paso OpenTabletDriver te deja elegir.
+`run.bat` pasa las opciones al programa. Por ejemplo: `run.bat --lang en --dry-run`.
 
 ## Seguridad
 
-- **Copia de seguridad antes de cualquier cambio** en la configuración de OTD: `<config>\Backup\osu-assistant-settings-AAAAMMDD-HHMMSS.json`, una vez por sesión.
-- **Confirmación explícita** antes de la primera prueba que aplica ajustes, antes de aplicar el resultado, antes de restaurar y antes de reemplazar un archivo.
-- **Modo de prueba** (`--dry-run`): nunca aplica nada.
-- El asistente nunca cierra ni reinicia OTD.
+- **Copia de seguridad antes de cambiar algo.** Antes del primer cambio, el asistente guarda una copia de `settings.json` en la carpeta `Backup`. Solo lo hace una vez por sesión.
+- **Confirmación explícita.** El asistente te pregunta antes de la primera prueba que aplica ajustes a OTD, y antes de guardar un preset, aplicar el resultado final o restaurar tus ajustes.
+- **Modo simulación (`--dry-run`).** No aplica nada a OTD y no hace pruebas por opción. Sirve para revisar la recomendación sin tocar nada.
+
+Qué se escribe y dónde (`<config>` es la carpeta de configuración de OTD):
 
 | Qué | Dónde | Cuándo |
 |---|---|---|
-| Copia de `settings.json` | `<config>\Backup\` | Antes del primer cambio |
-| Tu configuración guardada | Tu carpeta (o `<config>\Presets\`) | Al pulsar "Guardar como preset" |
-| Copia de un archivo reemplazado | `<tu carpeta>\Backup\<nombre>-AAAAMMDD-HHMMSS.json` | Antes de reemplazarlo |
-| Preset de respaldo | `<config>\Presets\osu-tablet-assistant.json` | Solo si no se pudo aplicar en vivo |
-| `settings.json` | `<config>\settings.json` | Solo con "Aplicar a OpenTabletDriver" |
-| Ajustes de prueba | Solo en la memoria del daemon de OTD | Durante las pruebas |
-| Ajustes del asistente y datos descargados | `%APPDATA%\OsuOpenTablet\` | Al cambiar ajustes o actualizar los datos |
+| Copia de seguridad de `settings.json` | `<config>\Backup\osu-assistant-settings-AAAAMMDD-HHMMSS.json` | Antes del primer cambio |
+| Preset del resultado | `<config>\Presets\osu-assistant <tableta> AAAAMMDD-HHMM.json` | Al pulsar "Guardar como preset" |
+| Preset de respaldo | `<config>\Presets\osu-tablet-assistant.json` | Solo si no se pudo aplicar en vivo. Se sobrescribe |
+| `settings.json` | `<config>\settings.json` | Solo al pulsar "Aplicar en OpenTabletDriver" |
+| Ajustes de prueba | Solo en la memoria del daemon de OTD | Durante las pruebas. No se escriben en el archivo |
 
-**Cómo deshacer:** "Restaurar mi configuración" en la app; o cargar un preset/archivo en OTD; o, con OTD cerrado, copiar la copia de seguridad encima de `settings.json`.
+Por defecto, `<config>` es `%LOCALAPPDATA%\OpenTabletDriver`. Si OTD está en modo portable, es la carpeta `userdata` junto al programa.
+
+**Cómo deshacer un cambio:**
+
+1. Dentro de la app: "Restaurar mis ajustes" (en Probar ajustes) o "Restaurar mis ajustes originales" (en Resultado). Vuelve a enviar a OTD los ajustes que había al empezar.
+2. Cargar un preset: en OpenTabletDriver, abre el menú **File > Presets** y selecciona el preset guardado.
+3. Restaurar el archivo a mano: con OTD cerrado, copia la copia de seguridad de `Backup` sobre `settings.json`. La app no tiene una función para esto.
+
+Si cierras la ventana con un ajuste de prueba todavía aplicado en OTD, el asistente te pregunta si quieres restaurarlo antes de salir.
+
+## Tabletas
+
+- La lista integrada tiene **48 tabletas** (`osu_tablet_assistant/knowledge/tablets_builtin.json`). Para cada una están el nombre exacto del perfil de OTD, el área activa en mm, la tasa de informes, la presión máxima y la resolución. Todas están marcadas como verificadas en área, presión y resolución contra los archivos de configuración de OTD. En 26 de ellas, la tasa de informes es una estimación basada en especificaciones del fabricante.
+- El nombre de tu perfil de OTD se compara con la lista sin importar mayúsculas, espacios ni signos de puntuación. Si la carpeta de OTD tiene una carpeta `Configurations`, sus definiciones también se leen y reemplazan a las integradas con el mismo nombre.
+- Si tu tableta no está en la lista, usa la **entrada manual**: nombre, ancho y alto del área activa en mm, tasa de informes en Hz (el campo empieza en 133 Hz) y presión máxima (opcional).
+- Si tu perfil de OTD no aparece en la lista, se muestra con el tamaño desconocido. Escribe el tamaño a mano.
 
 ## Filtros que conoce
 
-El catálogo (`osu_tablet_assistant/knowledge/filters.json`) se revisó contra el código fuente de los plugins el 2026-10-30 (`docs/research/filters.md`).
+El catálogo está en `osu_tablet_assistant/knowledge/filters.json`.
 
-| Filtro | Se recomienda automáticamente |
-|---|---|
-| Radial Follow (espacio de tableta y de pantalla), Hawku Smoothing, Devocub Antichatter | Sí |
-| Temporal Resampler | Sí, cuando la pantalla refresca mucho más rápido de lo que reporta la tableta |
-| Hawku Noise Reduction, Kuuube's Chatter Exterminator | Sí, si hay temblor |
-| Reconstructor, Spectral Reconstructor, Saturn Multifilter / HRRNC, Bezier Interpolator | No en las opciones estándar (avanzados); se usan vía configuraciones de la comunidad o tu propio perfil |
-| Frenet-Serret predictor, ScuffedInter/Extrapolator, Hover Distance Limiter, Saturn Area Rounding | **Nunca** (solo decides tú) |
+| Filtro | Para qué sirve | Se recomienda solo |
+|---|---|---|
+| Hawku Smoothing | Suavizado con latencia en ms | Sí |
+| Devocub Antichatter | Suavizado que actúa más en movimientos lentos | Sí |
+| Radial Follow (espacio de tableta) | Suavizado con radio. El cursor no se retrasa más que ese radio | Sí |
+| Radial Follow (espacio de pantalla) | Lo mismo, con el radio en píxeles | Sí |
+| Temporal Resampler | Interpola la posición para tabletas de tasa baja en monitores rápidos | Sí, según la condición |
+| Noise Reduction | Reduce el ruido al tener el lápiz casi quieto | Sí, si hay ruido |
+| Kuuube's Chatter Exterminator (smooth y raw) | Quita el chatter (temblor) | Sí, uno de ellos |
+| Saturn Multifilter | Antichatter, predicción y otras opciones | No (avanzado) |
+| Saturn Area Rounding | Remapea el área alrededor del centro de la pantalla | No (avanzado) |
 
-Correcciones de la revisión: `SmoothingCoefficient` ya admite 0,995; se quitaron las propiedades eliminadas de Saturn (`dacOuter`, `msOverride`); la `Frequency` de Saturn ya no se fuerza a la tasa de reporte (dudoso); y el orden de una cadena nueva sigue la investigación (ruido primero, luego suavizado, luego remuestreo). En OTD 0.6 el orden de la lista `Filters` es el orden de ejecución, así que el asistente **nunca reordena tu cadena** por etapa.
+Los nombres de los plugins que traen cada filtro están en el catálogo `filters.json` y en `otd/plugins.py`.
+
+Reglas:
+
+- **Solo se recomiendan filtros instalados.** El asistente busca los plugins en `<config>\Plugins\` (por nombre de carpeta, nombre del `metadata.json` o nombre de la DLL) y también cuenta los filtros que ya aparecen en tu `settings.json`. Si un filtro no aparece, no se recomienda.
+- **"Avanzado" significa que nunca se añade solo.** Solo aparece si ya lo tienes en tu perfil, y entonces se conserva en la opción "Tu configuración actual".
+- **La latencia de cada filtro es una estimación** calculada a partir de su algoritmo. No es una medición.
 
 ## Cómo funcionan las pruebas en vivo
 
-Cada prueba abre una ventana sin bordes sobre el monitor elegido. Para empezar: clic, toque con el lápiz o Espacio/Enter; sigue una cuenta atrás corta. Esc cancela.
+Cada prueba abre una ventana sin bordes que cubre el monitor elegido. Antes de empezar hay una cuenta regresiva de 3 segundos. Para empezar, haz clic (o toca con el lápiz). Esc cancela.
 
-| Prueba | Qué haces | Qué mide |
-|---|---|---|
-| Tasa de reporte | Dibuja círculos grandes a tu velocidad normal | Posiciones por segundo que llegan al cursor |
-| Estabilidad | Mantén el lápiz quieto, apoyado o en el aire | Cuánto tiembla el cursor |
-| Seguimiento | Sigue un punto que se mueve | Retraso, error de trayectoria y suavidad |
-| Puntería | Muévete sobre cada círculo: **cuenta en cuanto el cursor entra, sin clic** (funciona en el aire) | Tiempo a cada objetivo, cercanía al centro, pasada de largo |
+| Prueba | Duración | Qué pides al jugador | Qué mide |
+|---|---|---|---|
+| Tasa de informes | 5 s | Dibujar círculos grandes y continuos a velocidad normal de juego | Cuántas posiciones por segundo recibe el cursor |
+| Estabilidad | 5 s | Apoyar el lápiz sin moverlo (o mantenerlo cerca, en el aire) | Cuánto tiembla el cursor |
+| Seguimiento | 8 s | Seguir un punto que dibuja un ocho a velocidad constante | Retraso, error de trayectoria y suavidad |
+| Puntería | 20 círculos | Hacer clic en el centro de cada uno, de uno en uno | Distancia del clic al centro y tiempo hasta el clic |
 
-Límites: solo se mide el cursor del sistema (sin presión ni inclinación); el retraso incluye el tiempo de dibujo de la ventana; en Windows el cursor se lee unas 1500 veces por segundo; la puntuación es una heurística.
+**Límites de las pruebas:**
+
+- Solo miden el **cursor del sistema**. No ven presión, inclinación ni botones del lápiz.
+- El retraso incluye lo que tarda en dibujarse la ventana de prueba, no solo OTD.
+- En Windows, el cursor se consulta unas 1500 veces por segundo. En otros sistemas se usan eventos de la ventana, como alternativa de respaldo.
+- Si mueves el lápiz muy despacio, la tasa de informes puede salir más baja que la real.
+- La puntuación es una heurística. Cada métrica se convierte en una penalización entre 0 y 1, y la prioridad que elegiste decide cuánto pesa cada una. La calificación del 1 al 5 suma o resta hasta 10 puntos.
+
+**El tamaño del área** sale de un rango por estilo de juego, en milímetros de ancho: dedos 40 a 70, muñeca 60 a 100, mixto 75 a 120 y brazo 100 a 160. Luego se ajusta un poco según el tipo de mapas y el nivel, se recorta a lo que cabe en tu tableta y se respeta la proporción de tu pantalla. Son valores heurísticos con confianza baja, pensados como punto de partida. Si prefieres conservar tu tamaño actual, el asistente lo respeta.
+
+**Las opciones que se prueban** son:
+
+| Opción | Qué busca |
+|---|---|
+| Sin filtros (referencia) | Tu tableta tal cual. Sirve para comparar el resto |
+| Baja latencia | El menor retraso añadido posible |
+| Equilibrado | Suavizado moderado con poco retraso |
+| Suave | El cursor más estable, aceptando algo más de retraso |
+| Tu configuración actual | Solo si ya tienes un perfil en OTD, para compararlo |
+
+"Refinar la mejor" hace un ajuste pequeño del parámetro más influyente de la mejor opción. Se detiene cuando no quedan valores nuevos por probar, o tras cuatro pasos por opción.
 
 ## Estructura del proyecto
 
 ```
 osu-open-tablet/
-├── run.bat, build_exe.ps1
-├── data/                       paquete de datos de la comunidad para el botón "Actualizar" (generado)
-├── tools/refresh_data.py       regenera data/ (manifest + sumas de verificación)
-├── docs/                       ARCHITECTURE.md y research/
+├── run.bat                     lanzador para Windows
+├── pyproject.toml
+├── docs/ARCHITECTURE.md        diseño y contratos entre módulos
 └── osu_tablet_assistant/
-    ├── appconfig.py            ajustes del propio asistente (%APPDATA%\OsuOpenTablet)
-    ├── otd/                    todo lo que toca OTD
-    ├── knowledge/              tabletas, catálogo de filtros, presets de la comunidad, actualizador
-    ├── engine/                 área, recomendaciones, presets de la comunidad, métricas
-    ├── gui/                    el asistente y las pruebas en vivo
+    ├── __main__.py             punto de entrada y opciones
+    ├── models.py               tipos compartidos
+    ├── otd/                    todo lo que toca OTD (configuración, plugins, aplicación)
+    ├── knowledge/              tabletas y catálogo de filtros (JSON)
+    ├── engine/                 áreas, recomendaciones y métricas
+    ├── gui/                    asistente y pruebas en vivo
     └── locales/{es,en}/        textos de la interfaz
-tests/                          tests unitarios (unittest)
+tests/                          pruebas (unittest)
 ```
 
-## Tests y .exe
+## Ejecutar las pruebas
+
+Desde la carpeta del proyecto:
 
 ```
-py -3 -m unittest discover -s tests
+py -3 -m unittest discover -s tests -t .
+```
+
+## Crear el .exe
+
+Si quieres un ejecutable que funcione sin Python instalado, necesitas PyInstaller (`py -3 -m pip install pyinstaller`). Luego, desde la carpeta del proyecto:
+
+```
 powershell -ExecutionPolicy Bypass -File build_exe.ps1
 ```
 
-`build_exe.ps1` incluye automáticamente todos los módulos y todos los archivos de datos del paquete (los módulos y JSON nuevos entran sin editarlo).
+El resultado queda en `dist\Osu Open Tablet.exe`. El script lista a mano cada módulo y archivo de datos del paquete porque el programa carga algunos módulos "a pedido" (las pruebas del lápiz, el motor de recomendación, el control de OTD) y PyInstaller no los detecta solo. Sin eso, el `.exe` abre pero falla después con `No module named ...`.
 
-## Estado y limitaciones (con honestidad)
+## Contribuir
 
-- Versión 0.1.x, fase temprana. Aplicar en vivo (Console y pipe del daemon) está implementado a partir del código de OTD pero **no verificado con hardware real**.
-- La regla de escalado por área de los valores de la comunidad es una heurística (basada en cómo funciona la calculadora de Mixmg), no una regla de los autores de los plugins.
-- Las entradas de setup.moe las escriben los propios jugadores y no tienen fecha; los rankings cambian cada día; algunas configuraciones pueden ser antiguas. La mayoría de fuentes no registra el orden de los filtros.
-- No está resuelto si los ajustes de predicción cuentan como asistencia de entrada para osu!.
-- La tasa de reporte de tu tableta la escribes tú. Solo se detecta automáticamente el monitor principal.
-- Interfaz en español e inglés.
+- **Agregar una tableta:** añade una entrada en `osu_tablet_assistant/knowledge/tablets_builtin.json`. El campo `name` debe ser el nombre exacto del perfil de OTD. Pon `verified: true` solo si el área, la presión y la resolución se comprobaron contra los archivos de configuración de OTD. Pon `rate_estimated: true` si la tasa de informes viene de especificaciones del fabricante.
+- **Agregar un filtro:** el catálogo está en `osu_tablet_assistant/knowledge/filters.json` (ruta de OTD, parámetros con sus límites, fuentes y nivel de confianza). Agregarlo al catálogo no basta para recomendarlo. Hay que incluirlo en `engine/recommend.py`, y si es un plugin conocido, en `KNOWN_PLUGINS` de `otd/plugins.py` para que se detecte como instalado. Sus textos deben existir en `locales/es/engine.json` y `locales/en/engine.json`.
+- Lee `docs/ARCHITECTURE.md` antes de tocar el código.
+
+## Estado y limitaciones
+
+El proyecto está en la **versión 0.1.0**, en una etapa temprana.
+
+- Aplicar ajustes a un OTD en ejecución (con `OpenTabletDriver.Console loadsettings` y con la tubería del daemon) está implementado a partir del código fuente de OTD, pero **todavía no está verificado en hardware real**. Si no se puede aplicar, el asistente guarda un preset y te indica cómo cargarlo.
+- La tasa de informes de tu tableta la escribes tú. El asistente no la detecta.
+- Solo se detecta el monitor principal. Para otro monitor, escribe el tamaño y la posición de su esquina superior izquierda, en píxeles del escritorio.
+- El proyecto está pensado para Windows. La captura del cursor de alta frecuencia es específica de Windows.
+- Solo se mide el cursor del sistema: sin presión ni inclinación.
+- Los rangos de área, las latencias y las puntuaciones son estimaciones y heurísticas.
+- La interfaz está en español e inglés.
 
 ## Licencia
 
-[MIT](LICENSE).
+Este proyecto usa la licencia [MIT](LICENSE).
