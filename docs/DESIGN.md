@@ -4,7 +4,7 @@
 
 The interface aims to be professional, simple and calm: one primary action per screen, rounded
 glass-like panels on a deep graphite-blue ground, one accent colour used sparingly, no decorative
-icons or filler text. Real screenshots (100 %, 125 % and 150 % scaling, Spanish and English) are in
+icons or filler text. Real screenshots (100 % scaling in Spanish, plus one in English at 125 %; the other scales and language are regenerated on demand) are in
 [`docs/screenshots`](screenshots); regenerate them with `py -3 tools/screenshots.py es`
 (or `en 1.25`, `es 1.5`).
 
