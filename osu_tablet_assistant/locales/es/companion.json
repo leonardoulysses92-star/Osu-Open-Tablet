@@ -111,5 +111,6 @@
   "passive.path.worse": "Trayectoria del cursor más áspera desde el cambio ({before} -> {after}, efecto {strength}).",
   "passive.path.similar": "Suavidad de la trayectoria más o menos igual ({before} -> {after}).",
   "passive.path.not_enough_data": "Suavidad de la trayectoria: todavía no hay suficiente movimiento para comparar.",
-  "passive.rate.info": "Actualizaciones del cursor al moverse: {before} -> {after} por segundo."
+  "passive.rate.info": "Actualizaciones del cursor al moverse: {before} -> {after} por segundo.",
+ "companion.open_coach": "Pasar al coach de partidas"
 }

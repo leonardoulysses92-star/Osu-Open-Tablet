@@ -76,6 +76,7 @@ class App:
         self._build_header()
         if wizard_module.COMPANION_LAUNCHER is None:        # an explicit launcher set by the caller wins
             wizard_module.COMPANION_LAUNCHER = self._open_companion
+            wizard_module.COACH_LAUNCHER = self._open_coach
             self.root.bind("<Destroy>", self._release_companion, add="+")
         self.wizard = Wizard(self.root, session, config_hint, install_hint, on_close=self.root.destroy)
         self.wizard.pack(fill="both", expand=True)
@@ -88,6 +89,7 @@ class App:
         """Window closed: stop pointing the result screen at this (dead) app."""
         if event.widget is self.root and wizard_module.COMPANION_LAUNCHER == self._open_companion:
             wizard_module.COMPANION_LAUNCHER = None
+            wizard_module.COACH_LAUNCHER = None
 
     def _open_companion(self, view: object) -> None:
         """Result-screen button: open the live-tuning companion on the current session."""
@@ -101,6 +103,20 @@ class App:
         try:
             from .companion import open_companion
             open_companion(self.root, session, on_keep=kept)
+        except Exception as exc:  # the window must never take the wizard down with it
+            messagebox.showerror(t("gui.app.title"), str(exc), parent=self.root)
+
+    def _open_coach(self, view: object) -> None:
+        """Result-screen / welcome-path button: open the Play Coach on the current session."""
+        from tkinter import messagebox
+        session = view.session   # type: ignore[attr-defined]
+
+        def kept(_settings: dict) -> None:
+            session._wrote_settings = True      # same reason as for the companion
+
+        try:
+            from .coach import open_coach
+            open_coach(self.root, session, on_keep=kept)
         except Exception as exc:  # the window must never take the wizard down with it
             messagebox.showerror(t("gui.app.title"), str(exc), parent=self.root)
 
@@ -146,6 +162,10 @@ class App:
                                      command=self._on_language, style="Segment.Toolbutton", takefocus=True)
             option.pack(side="left", padx=(0, 2))
             Tooltip(option, _LANGUAGE_NAMES[code])
+        self._advanced_var = tk.BooleanVar(value=self.session.advanced)
+        self._advanced = ttk.Checkbutton(lang, variable=self._advanced_var, command=self._on_advanced, takefocus=True)
+        self._advanced.pack(side="left", padx=(px(header, 14), 0))
+        Tooltip(self._advanced, lambda: t("gui.app.advanced_tip"))
         self._settings_button = button(inner, "", lambda: self.wizard.open_settings(), kind="ghost")
         self._settings_button.pack(side="right", padx=(0, px(header, 12)))
         if self.session.dry_run:
@@ -160,6 +180,7 @@ class App:
         self._subtitle.configure(text=t("gui.app.subtitle"))
         self._lang_label.configure(text=t("gui.app.language"))
         self._settings_button.configure(text="⚙  " + t("gui.settings.open"))
+        self._advanced.configure(text=t("gui.app.advanced"))
         if self._dry_chip is not None:
             self._dry_chip.set(t("gui.app.dry_run"), "info")
 
@@ -172,6 +193,12 @@ class App:
         self.session.app_config.language = code
         self.session._optional(self.session.save_app_config)
         self._retitle()
+        self.wizard.rebuild()
+
+    def _on_advanced(self) -> None:
+        """Simple <-> Advanced: the technical cards appear or hide; the choice is remembered."""
+        self.session.app_config.advanced_ui = bool(self._advanced_var.get())
+        self.session._optional(self.session.save_app_config)
         self.wizard.rebuild()
 
     def run(self) -> None:

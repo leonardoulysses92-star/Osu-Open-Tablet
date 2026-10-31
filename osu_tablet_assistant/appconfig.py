@@ -55,6 +55,7 @@ class AppConfig:
     preset_name_template: str = DEFAULT_NAME_TEMPLATE   # {tablet} and {timestamp} are filled in
     plugin_policy: str = "installed"
     check_updates_on_start: bool = False       # off by default: no network access unless asked
+    advanced_ui: bool = False                  # "Advanced" mode shows the technical cards (off = Simple)
     update_url: str = DEFAULT_UPDATE_URL
     last_update_check: str | None = None       # ISO timestamp of the last successful check
     version: int = 1
@@ -78,6 +79,7 @@ def from_dict(data: Any) -> AppConfig:
         "preset_name_template": lambda v: isinstance(v, str) and 0 < len(v) <= 120,
         "plugin_policy": lambda v: v in POLICIES,
         "check_updates_on_start": lambda v: isinstance(v, bool),
+        "advanced_ui": lambda v: isinstance(v, bool),
         "update_url": _valid_url,
         "last_update_check": lambda v: v is None or (isinstance(v, str) and len(v) <= 40),
         "version": lambda v: isinstance(v, int) and not isinstance(v, bool),

@@ -38,7 +38,7 @@ from .i18n import t, tr
 from .session import (
     BASELINE_KINDS,
     CANDIDATE_KINDS,
-    STEP_ORDER,
+    GOALS,
     Session,
     SessionError,
     Step,
@@ -117,6 +117,10 @@ class Page(ttk.Frame):
     def next_enabled(self) -> bool:
         """Whether the Next button is usable."""
         return self.session.can_advance()
+
+    def next_label(self) -> str:
+        """Text of the Next button."""
+        return t(self.next_key)
 
     # --- layout helpers
     def gap(self, size: int = _GAP) -> int:
@@ -239,28 +243,47 @@ class WelcomePage(Page):
     step = Step.WELCOME
 
     def build(self) -> None:
+        s = self.session
         label(self, t("gui.welcome.eyebrow"), "Eyebrow").pack(anchor="w")
         label(self, t("gui.welcome.title"), "Display").pack(anchor="w", pady=(px(self, 2), px(self, 6)))
         WrapLabel(self, t("gui.welcome.intro"), "Muted").pack(fill="x", pady=(0, self.gap(20)))
-        if self.session.dry_run:
+        if s.dry_run:
             notice = Notice(self)
             notice.pack(fill="x", pady=(0, self.gap()))
             notice.show(t("gui.welcome.dry_run"), "info")
-        steps = self.card(t("gui.welcome.steps_title"))
-        steps.body.columnconfigure(1, weight=1)
-        for index in range(1, 6):
-            badge = tk.Label(steps.body, text=str(index), bg=COLORS.accent_soft, fg=COLORS.accent,
-                             width=2, font=font("small_bold"))
-            badge.grid(row=index, column=0, sticky="nw", padx=(0, px(self, 12)), pady=px(self, 4))
-            WrapLabel(steps.body, t(f"gui.welcome.step{index}")).grid(
-                row=index, column=1, sticky="we", pady=px(self, 4))
-        DataCard(self, self.wizard).pack(fill="x", pady=(0, self.gap()))
+        box = self.card(t("gui.welcome.goal_title"), t("gui.welcome.goal_help"))
+        self._goal = tk.StringVar(value=s.goal)
+        for goal in GOALS:
+            row = frame(box.body)
+            row.pack(fill="x", pady=(px(self, 4), px(self, 8)))
+            top = frame(row)
+            top.pack(fill="x")
+            radio(top, t(f"gui.welcome.goal.{goal}.title"), goal, self._goal, command=self._choose).pack(side="left")
+            if goal == "guided":
+                Chip(top, t("gui.welcome.recommended"), "accent").pack(side="left", padx=(px(self, 8), 0))
+            WrapLabel(row, t(f"gui.welcome.goal.{goal}.text"), "Muted").pack(
+                fill="x", padx=(px(self, 24), 0))
+        if s.advanced:       # the long explanation and the community data are Advanced-mode content
+            steps = self.card(t("gui.welcome.steps_title"))
+            steps.body.columnconfigure(1, weight=1)
+            for index in range(1, 6):
+                badge = tk.Label(steps.body, text=str(index), bg=COLORS.accent_soft, fg=COLORS.accent,
+                                 width=2, font=font("small_bold"))
+                badge.grid(row=index, column=0, sticky="nw", padx=(0, px(self, 12)), pady=px(self, 4))
+                WrapLabel(steps.body, t(f"gui.welcome.step{index}")).grid(
+                    row=index, column=1, sticky="we", pady=px(self, 4))
+            DataCard(self, self.wizard).pack(fill="x", pady=(0, self.gap()))
         box = self.card(t("gui.welcome.disclaimer_title"), accent=COLORS.warn)
         WrapLabel(box.body, t("gui.welcome.disclaimer")).pack(fill="x")
-        self._accepted = tk.BooleanVar(value=self.session.accepted_disclaimer)
+        self._accepted = tk.BooleanVar(value=s.accepted_disclaimer)
         accept = check(box.body, t("gui.welcome.accept"), self._accepted, command=self._toggle)
         accept.pack(anchor="w", pady=(px(self, 12), 0))
         self.after_idle(accept.focus_set)
+
+    def _choose(self) -> None:
+        self.session.set_goal(self._goal.get())
+        self.wizard.update_nav()
+        self.wizard.refresh_stepper()
 
     def _toggle(self) -> None:
         self.session.accepted_disclaimer = self._accepted.get()
@@ -521,6 +544,10 @@ class TabletPage(Page):
 # ---------------------------------------------------------------------- display
 class DisplayPage(Page):
     step = Step.DISPLAY
+
+    def next_label(self) -> str:
+        """Live tuning and the coach end here: "Next" opens the tool."""
+        return t(f"gui.nav.open_{self.session.goal}") if self.session.at_goal_launch else super().next_label()
 
     def build(self) -> None:
         self.title("gui.display.title", t("gui.display.intro"))
@@ -1095,6 +1122,16 @@ RESULT_SECTIONS: list[Callable[["ResultsView"], None]] = []
 # While it is None the button is not shown. Its label is "gui.result.companion".
 # ============================================================================
 COMPANION_LAUNCHER: Callable[["ResultsView"], None] | None = None
+# Same idea for the Play Coach (button "Play Coach" on the result screen and the welcome path). Its argument
+# has the same ``session`` / ``page`` attributes (a ``ResultsView`` or a ``LaunchContext``).
+COACH_LAUNCHER: Callable[["ResultsView"], None] | None = None
+
+
+@dataclass(frozen=True)
+class LaunchContext:
+    """What a launcher gets when it is started from the welcome path instead of the result screen."""
+    session: Session
+    page: tk.Misc
 
 
 class ResultsView(ttk.Frame):
@@ -1130,9 +1167,10 @@ class ResultsView(ttk.Frame):
         for hook in RESULT_SECTIONS:
             hook(self)
         self.report = Expander(self, t("gui.result.full_report"), height=14)
-        self.report.pack(fill="x", pady=(px(self, 4), 0))
         self.log = Expander(self)
-        self.log.pack(fill="x")
+        if parent.session.advanced:      # the technical report and log are Advanced-mode content
+            self.report.pack(fill="x", pady=(px(self, 4), 0))
+            self.log.pack(fill="x")
 
     def add_section(self, title: str, builder: SectionBuilder, subtitle: str | None = None,
                     index: int | None = None) -> Card:
@@ -1253,10 +1291,15 @@ class ResultsView(ttk.Frame):
         if s.can_measure:
             self.buttons.append(button(row, t("gui.result.restore"), self.page._on_restore, kind="ghost"))
         self.companion_button: ttk.Button | None = None
+        self.coach_button: ttk.Button | None = None
         launcher = COMPANION_LAUNCHER   # EXTENSION POINT (see COMPANION_LAUNCHER above)
         if launcher is not None:
-            self.companion_button = button(row, t("gui.result.companion"), lambda: launcher(self))
+            self.companion_button = button(row, t("gui.result.companion"), lambda: launcher(self), kind="ghost")
             self.buttons.append(self.companion_button)
+        coach_launcher = COACH_LAUNCHER
+        if coach_launcher is not None:
+            self.coach_button = button(row, t("gui.result.coach"), lambda: coach_launcher(self), kind="ghost")
+            self.buttons.append(self.coach_button)
         target = s.output_dir or (s.config_dir / "Presets" if s.config_dir else None)
         if target is not None:
             WrapLabel(body, t("gui.result.save_where", path=str(target)), "Small").pack(
@@ -1641,7 +1684,7 @@ class Wizard(ttk.Frame):
     def visible_steps(self) -> list[str]:
         """i18n keys of the steps shown in the stepper (session steps plus visible slots)."""
         keys = []
-        for step in STEP_ORDER:
+        for step in self.session.goal_steps():
             keys.append(f"gui.step.{step.value}")
             keys += [slot.key for slot in self._slots_after(step)]
         return keys
@@ -1665,6 +1708,13 @@ class Wizard(ttk.Frame):
         self._counter.configure(text=t("gui.nav.counter", n=index + 1, total=len(keys)))
         self.update_nav()
 
+    def refresh_stepper(self) -> None:
+        """Redraw the step indicator (the chosen goal changes how many steps there are)."""
+        keys = self.visible_steps()
+        current = self.slot.key if self.slot is not None else f"gui.step.{self.session.step.value}"
+        self.indicator.show([t(k) for k in keys], keys.index(current))
+        self._counter.configure(text=t("gui.nav.counter", n=keys.index(current) + 1, total=len(keys)))
+
     def rebuild(self) -> None:
         """Re-render after a language change, keeping what was typed."""
         if self.page is not None:
@@ -1676,7 +1726,7 @@ class Wizard(ttk.Frame):
         if self.page is None:
             return
         self._back.configure(text="←  " + t("gui.nav.back"))
-        self._next.configure(text=t(self.page.next_key) + "  →")
+        self._next.configure(text=self.page.next_label() + "  →")
         can_back = self.session.can_go_back() or self.slot is not None
         self._back.configure(state="normal" if can_back and not self._busy else "disabled")
         self._next.configure(state="normal" if self.page.next_enabled() and not self._busy else "disabled")
@@ -1729,6 +1779,9 @@ class Wizard(ttk.Frame):
         self.clear_error()
         if not self.page.commit():
             return
+        if self.session.at_goal_launch:
+            self.launch_goal()
+            return
         if self.slot is None:
             slots = self._slots_after(self.session.step)
             if slots and self.session.can_advance():
@@ -1737,6 +1790,17 @@ class Wizard(ttk.Frame):
                 return
         self.set_busy(True)
         run_in_thread(self, self.session.advance, lambda _s: self._moved(), self._move_failed)
+
+    def launch_goal(self) -> None:
+        """Open the live-tuning companion or the Play Coach on the current session."""
+        launcher = COACH_LAUNCHER if self.session.goal == "coach" else COMPANION_LAUNCHER
+        if launcher is None:
+            self.show_error(SessionError("core.error.no_launcher"))
+            return
+        try:
+            launcher(LaunchContext(self.session, self))
+        except Exception as exc:   # the window must never take the wizard down with it
+            self.show_error(exc)
 
     def _moved(self) -> None:
         self.slot = None

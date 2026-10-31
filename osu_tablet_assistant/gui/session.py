@@ -42,6 +42,10 @@ BASELINE_KINDS = ("rate", "stillness")
 # metric smoothing filters improve most (without it no-filter always wins on lag).
 CANDIDATE_KINDS = ("stillness", "tracking", "aim")
 MAX_REFINE_ROUNDS = 5
+# What the player wants from this run: the full guided setup, live tuning, or the Play Coach.
+GOALS = ("guided", "live", "coach")
+# Steps shared by the live and coach goals (they need OTD, tablet and display, then open their tool).
+SETUP_STEPS = ("welcome", "detect", "tablet", "display")
 
 _SETTINGS_IO = "osu_tablet_assistant.otd.settings_io"
 _PLUGINS = "osu_tablet_assistant.otd.plugins"
@@ -199,6 +203,7 @@ class Session:
     services: Services = field(default_factory=Services)
     dry_run: bool = False
     step: Step = Step.WELCOME
+    goal: str = "guided"                      # one of GOALS, chosen on the welcome screen
     history: list[Step] = field(default_factory=list)
     accepted_disclaimer: bool = False
     log: list[str] = field(default_factory=list)
@@ -273,6 +278,28 @@ class Session:
         return self.profile.tablet_name
 
     # --------------------------------------------------------------- navigation
+    @property
+    def advanced(self) -> bool:
+        """True in Advanced mode (technical cards visible)."""
+        return bool(self.app_config.advanced_ui)
+
+    def set_goal(self, goal: str) -> None:
+        """Choose what to do (``GOALS``); live and coach skip the measuring steps."""
+        if goal not in GOALS:
+            raise SessionError("core.error.goal")
+        self.goal = goal
+
+    def goal_steps(self) -> list[Step]:
+        """The steps of the chosen goal, in order (live / coach stop after the display)."""
+        if self.goal == "guided":
+            return list(STEP_ORDER)
+        return [s for s in STEP_ORDER if s.value in SETUP_STEPS]
+
+    @property
+    def at_goal_launch(self) -> bool:
+        """True on the last step of a live / coach goal, where "Next" opens the tool."""
+        return self.goal != "guided" and self.step is Step.DISPLAY
+
     def can_go_back(self) -> bool:
         """True unless the user is on the first step."""
         return bool(self.history)
@@ -294,7 +321,7 @@ class Session:
 
     def advance(self) -> Step:
         """Go to the next step, preparing it; raises SessionError when not allowed."""
-        if not self.can_advance():
+        if not self.can_advance() or self.at_goal_launch:
             raise SessionError("core.error.cannot_advance")
         target = STEP_ORDER[STEP_ORDER.index(self.step) + 1]
         if target is Step.TESTING:

@@ -27,6 +27,18 @@ El asistente te lleva por estos pasos:
 - No cambia nada sin tu confirmación y **nunca instala plugins** (solo te dice cuál, por qué, dónde encontrarlo y cómo instalarlo tú).
 - Nunca activa la predicción por su cuenta (ver "Normas de osu!").
 
+## Tres caminos desde la bienvenida
+
+- **Configuración guiada** (recomendada): los pasos de arriba.
+- **Ajuste en vivo**: el acompañante. Juegas y pulsas "más suave" / "más reactivo" hasta que se sienta bien (ver `docs/COMPANION.md`).
+- **Coach de partidas**: juegas un mapa de verdad y el coach alinea tus clics con el mapa, te dice en palabras sencillas dónde te quedas corto (esquinas, arriba/abajo, laterales) y propone **un** cambio por ronda (mover el área, cambiar su tamaño o un filtro). Se aplica en vivo, juegas otra vez, y se repite hasta que ya no queda nada por ganar. Qué ve, qué infiere y sus límites: `docs/PLAY_COACH.md`.
+
+Un interruptor "Modo avanzado" (arriba a la derecha) muestra los datos técnicos (informe completo, registro, datos de la comunidad). Por defecto está apagado.
+
+### La tabla "Opciones para probar"
+
+Cada opción muestra un **Resultado en palabras** (Excelente / Buena / Normal / Floja), no puntos. Repetir una prueba **no sobrescribe** la anterior: se usa la mediana de todas las ejecuciones, así una mala ejecución suelta no tapa una buena. Una opción sin las tres pruebas aparece como "incompleta" y nunca queda por encima de una completa. Si las mejores opciones están dentro del ruido de la medida, se marcan todas con ★ ("empate: elige por sensación"). Los objetivos de las pruebas usan una semilla fija por tipo de prueba, así que todas las opciones y repeticiones ven los mismos objetivos, y la prueba de puntería ignora los 2 primeros. El número queda en "Ver datos técnicos".
+
 ## Requisitos
 
 | Requisito | Detalle |
@@ -162,7 +174,8 @@ osu-open-tablet/
     ├── appconfig.py            ajustes del propio asistente (%APPDATA%\OsuOpenTablet)
     ├── otd/                    todo lo que toca OTD
     ├── knowledge/              tabletas, catálogo de filtros, presets de la comunidad, actualizador
-    ├── engine/                 área, recomendaciones, presets de la comunidad, métricas
+    ├── engine/                 área, recomendaciones, presets de la comunidad, métricas, veredictos (judge)
+                                y el motor del coach (beatmap, playobserve, areafit, optimizer, findings)
     ├── gui/                    el asistente y las pruebas en vivo
     └── locales/{es,en}/        textos de la interfaz
 tests/                          tests unitarios (unittest)
@@ -185,6 +198,8 @@ powershell -ExecutionPolicy Bypass -File build_exe.ps1
 - No está resuelto si los ajustes de predicción cuentan como asistencia de entrada para osu!.
 - La tasa de reporte de tu tableta la escribes tú. Solo se detecta automáticamente el monitor principal.
 - Interfaz en español e inglés.
+- **Coach de partidas**: sin lápiz ni osu! reales no se pudo verificar la alineación en una partida real; el cambio de coordenadas del playfield es aproximado (osu!stable a pantalla completa sin bordes), osu!lazer o en ventana pueden fallar, la rotación 90/270 no está verificada y las constantes del coste y los umbrales son estimaciones **sin calibrar**. Solo lee teclas de clic en Windows.
+- `build_exe.ps1` no se ejecutó en esta revisión (solo funciona en Windows): reconstruye el .exe con él antes de publicar.
 
 ## Licencia
 

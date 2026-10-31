@@ -72,9 +72,14 @@ osu-open-tablet/
       recommend.py              candidates, scoring, ranking, refinement     [engine]
       community.py              presets -> candidates, area adaptation, comparison, suggestions
       metrics.py                pure functions: samples -> MetricsReport     [tests]
+      judge.py                  repeated runs -> median, grade in words, reliability, ties
+      playtypes.py beatmap.py areafit.py playobserve.py optimizer.py findings.py
+                                Play Coach engine, see docs/PLAY_COACH.md
     gui/
       app.py wizard.py session.py widgets.py i18n.py                         [gui]
       live_tests.py             tkinter pen tests that yield samples         [tests]
+      playwatch.py coachcore.py coach.py tabletmap.py mapgeometry.py palette.py
+                                Play Coach (recorder, logic without Tk, window, tablet map)
     locales/{es,en}/*.json      i18n, one file per owner (see below)
   tests/                        unittest, one test module per source module
   docs/
@@ -263,6 +268,18 @@ Integration notes (verified when wiring the modules together):
 * A rotated current area (e.g. 180 deg, left-handed) keeps its rotation.
 * Per candidate the wizard runs `stillness`, `tracking` and `aim` while that
   candidate is live in OTD (jitter is part of the score).
+* Repeating a test never overwrites it: `Session.record_report` appends to `CandidateResult.runs` and
+  `CandidateResult.reports` is the aggregate (`engine.judge.aggregate_by_kind`: field-wise median, the most
+  extreme run dropped from 4 runs). `recommend.rank(..., required_kinds)` flags a result that lacks a kind as
+  `complete=False` and always ranks it after the complete ones; `judge.summarize` adds the grade
+  (Excellent/Good/Fair/Weak from the objective score, thresholds in `judge.GRADE_*`), the reliability and the
+  tie group (scores within the noise of the best are all starred). Noise sources: the aim targets used an
+  unseeded RNG (fixed now: `live_tests.TEST_SEEDS`, one seed per test kind), the first aims of a run were
+  slower (the first 2 are played but not scored), and 20 aim targets give a noisy mean (not changed: human
+  variability, fatigue and order effects between options cannot be removed, only averaged by repeating).
+* Welcome paths (`Session.goal`: guided / live / coach). Live and coach end at the display step, where
+  "Next" opens the tool through `wizard.COMPANION_LAUNCHER` / `wizard.COACH_LAUNCHER` (same extension
+  points as the result screen). `AppConfig.advanced_ui` (header switch) shows or hides the technical cards.
 
 **gui** (`osu_tablet_assistant.gui`, `knowledge.tablets`)
 

@@ -81,10 +81,10 @@ class CoachWindow:
                  translate: Translate | None = None, on_keep: Callable[[dict], None] | None = None,
                  on_close: Callable[[], None] | None = None, enable_hotkeys: bool = True,
                  hotkey_backend: hk.HotkeyBackend | None = None, beeper: hk.Beeper | None = None,
-                 **core_kwargs: Any) -> None:
+                 settings: dict | None = None, **core_kwargs: Any) -> None:
         self.t: Translate = translate or default_t
         self.on_keep, self.on_close = on_keep, on_close
-        self.core = core if core is not None else self._core_from_session(session, **core_kwargs)
+        self.core = core if core is not None else self._core_from_session(session, settings, **core_kwargs)
         self.beeper = beeper if beeper is not None else hk.Beeper()
         self._actions: queue.Queue[str] = queue.Queue()
         self.hotkeys = hk.HotkeyManager({"coach_toggle": COACH_HOTKEY}, self._actions.put,
@@ -112,9 +112,10 @@ class CoachWindow:
         self._job = self.root.after(TICK_MS, self._tick)
 
     # ------------------------------------------------------------- construction
-    def _core_from_session(self, session: Any, **kwargs: Any) -> CoachCore:
+    def _core_from_session(self, session: Any, settings: dict | None = None, **kwargs: Any) -> CoachCore:
+        """``settings`` overrides the settings taken from the session (e.g. the companion's live ones)."""
         args = companion_args_from_session(session) if session is not None else {}
-        settings, name = args.get("settings"), args.get("tablet_name")
+        settings, name = settings if settings is not None else args.get("settings"), args.get("tablet_name")
         if settings is None or not name:
             raise ValueError("CoachWindow needs a session (or a core)")
         dry_run, controller = bool(args.get("dry_run")), args.get("controller")

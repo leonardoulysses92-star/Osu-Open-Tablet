@@ -27,6 +27,18 @@ The assistant takes you through these steps:
 - It does not change anything without your confirmation, and it **never installs plugins** (it only tells you which one, why, where to find it and how to install it yourself).
 - It never turns prediction on by itself (see "osu! rules").
 
+## Three paths from the welcome screen
+
+- **Guided setup** (recommended): the steps above.
+- **Live tuning**: the companion. You play and press "smoother" / "more responsive" until it feels right (see `docs/COMPANION.md`).
+- **Play Coach**: you play a real map; the coach lines your clicks up with the map, tells you in plain words where you fall short (corners, top/bottom, sides) and suggests **one** change per round (move the area, resize it, or one filter). It is applied live, you play again, and it repeats until there is nothing left to gain. What it sees, what it infers and its limits: `docs/PLAY_COACH.md`.
+
+An "Advanced mode" switch (top right) shows the technical data (full report, log, community data). It is off by default.
+
+### The "Options to test" table
+
+Each option shows a **Result in words** (Excellent / Good / Fair / Weak), not points. Repeating a test **does not overwrite** the previous one: the median of all runs is used, so one bad run cannot hide a good one. An option missing any of the three tests shows as "incomplete" and is never ranked above a complete one. When the best options are within the measurement noise they are all starred (★, "tie: choose by feel"). Test targets use one fixed seed per test kind, so every option and every repeat sees the same targets, and the aim test ignores its first 2. The number is under "See technical data".
+
 ## Requirements
 
 | Requirement | Details |
@@ -162,7 +174,8 @@ osu-open-tablet/
     ├── appconfig.py            the assistant's own settings (%APPDATA%\OsuOpenTablet)
     ├── otd/                    everything that touches OTD
     ├── knowledge/              tablets, filter catalog, community presets, updater
-    ├── engine/                 area, recommendations, community presets, metrics
+    ├── engine/                 area, recommendations, community presets, metrics, verdicts (judge)
+                                and the coach engine (beatmap, playobserve, areafit, optimizer, findings)
     ├── gui/                    the wizard and the live tests
     └── locales/{es,en}/        interface text
 tests/                          unit tests (unittest)
@@ -185,6 +198,8 @@ powershell -ExecutionPolicy Bypass -File build_exe.ps1
 - Whether prediction settings count as input assistance for osu! is unresolved.
 - You type your tablet's report rate yourself. Only the primary monitor is detected automatically.
 - Spanish and English interface.
+- **Play Coach**: without a real pen and a real osu! the alignment could not be verified in an actual play; the playfield transform is an approximation (osu!stable, borderless full screen), osu!lazer or windowed play may fail, rotation 90/270 is unverified and the cost constants and thresholds are **uncalibrated** estimates. It reads click keys on Windows only.
+- `build_exe.ps1` was not run in this review (Windows only): rebuild the .exe with it before releasing.
 
 ## License
 

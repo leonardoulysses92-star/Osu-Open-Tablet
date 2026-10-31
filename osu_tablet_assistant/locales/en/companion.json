@@ -111,5 +111,6 @@
   "passive.path.worse": "Cursor path rougher since the change ({before} -> {after}, {strength} effect).",
   "passive.path.similar": "Cursor path smoothness about the same ({before} -> {after}).",
   "passive.path.not_enough_data": "Path smoothness: not enough movement yet to compare.",
-  "passive.rate.info": "Cursor updates while moving: {before} -> {after} per second."
+  "passive.rate.info": "Cursor updates while moving: {before} -> {after} per second.",
+ "companion.open_coach": "Switch to the Play Coach"
 }

@@ -349,6 +349,7 @@ class CompanionWindow:
         available = set(available_filters if available_filters is not None else args.get("available_filters", ()))
         dry_run = bool(args.get("dry_run", False) if dry_run is None else dry_run)
         self.t: Translate = translate or default_t
+        self.session = session
         self.on_keep, self.on_close = on_keep, on_close
         self.dry_run = dry_run
 
@@ -423,6 +424,8 @@ class CompanionWindow:
         self._label(outer, var=self.var_live, color=WARN)
         if self.dry_run:
             self._label(outer, "companion.dry_run", color=WARN)
+        if self.session is not None and not self.own_root:
+            self._button(outer, self.t("companion.open_coach"), self.open_coach).pack(anchor="w", pady=(6, 0))
         cols = tk.Frame(outer, bg=BG)
         cols.pack(fill="both", expand=True, pady=(8, 0))
         left = tk.Frame(cols, bg=BG)
@@ -550,6 +553,14 @@ class CompanionWindow:
             self._feedback(fb)
         self.var_motion.set("")
         self.var_rest.set("")
+
+    def open_coach(self) -> None:
+        """Hand over to the Play Coach, starting from the settings that are live right now."""
+        from .coach import open_coach
+        parent = self.root.master
+        live = self.tuner.settings
+        self.destroy()
+        open_coach(parent, self.session, settings=live, on_keep=self.on_keep)
 
     def revert_all(self) -> None:
         self._feedback(self.core.revert_all())
