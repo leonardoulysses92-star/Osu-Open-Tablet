@@ -20,18 +20,25 @@ from pathlib import Path
 from typing import Any, Callable
 
 from ..appconfig import AppConfig, preset_file_name
-from ..engine import judge
+from .. import profile as profile_mod
+from ..engine import areafit, judge, recommend
 from ..knowledge import tablets as tablet_db
 from ..models import (
     ApplyResult,
     Candidate,
     CandidateResult,
     DisplaySpec,
+    MapPreference,
     MetricsReport,
+    PlayStyle,
     PluginInfo,
     PluginPolicy,
+    Priority,
+    ProfileChanges,
     ProfileInfo,
+    Reason,
     Rect,
+    SkillLevel,
     TabletSpec,
     UserPreferences,
 )
@@ -52,6 +59,7 @@ _PLUGINS = "osu_tablet_assistant.otd.plugins"
 _RECOMMEND = "osu_tablet_assistant.engine.recommend"
 _COMMUNITY = "osu_tablet_assistant.engine.community"
 _UPDATER = "osu_tablet_assistant.knowledge.updater"
+SAVED_CANDIDATES = 2         # the player's own last saved settings offered as options (when they still fit)
 COMMUNITY_CANDIDATES = 3     # closest community presets measured per run (plus the chosen start)
 
 
@@ -231,6 +239,8 @@ class Session:
     starting_presets: list[Any] = field(default_factory=list)
     starting_preset_id: str | None = None
     app_config: AppConfig = field(default_factory=AppConfig)
+    profile_store: Any = None                 # profile.ProfileStore; None = nothing is remembered (tests)
+    saved_profile: Any = None                 # profile.SavedProfile of the selected tablet, if any
     app_config_path: Path | None = None      # None = do not persist (tests, --dry-run unaffected)
     locations: list[Any] = field(default_factory=list)   # settings_io.ConfigLocation
     otd_notice: tuple[str, dict[str, Any]] | None = None
@@ -278,6 +288,170 @@ class Session:
         return self.profile.tablet_name
 
     # --------------------------------------------------------------- navigation
+    # ------------------------------------------------------------ saved profile
+    def _find_saved_profile(self) -> Any:
+        """The saved profile of the selected tablet, else of any tablet OTD knows (newest first)."""
+        store = self.profile_store
+        if store is None:
+            return None
+        names = [self.tablet.name] if self.tablet is not None else [p.tablet_name for p in self.profiles]
+        found = [store.get(n) for n in names if n]
+        found = [f for f in found if f is not None]
+        return max(found, key=lambda p: p.updated, default=None)
+
+    def _saved_signature(self) -> tuple:
+        sp = self.saved_profile
+        return tuple((h.when, h.source) for h in sp.history[:SAVED_CANDIDATES]) if sp is not None else ()
+
+    def _chose_saved(self) -> bool:
+        """True when the player picked one of their own saved settings (no new measurement needed)."""
+        if self.chosen_id is None:
+            return False
+        try:
+            return "saved" in self.candidate(self.chosen_id).tags
+        except SessionError:
+            return False
+
+    def remember_choices(self) -> bool:
+        """Store the tablet, display and answers so the next run does not ask again."""
+        store = self.profile_store
+        if store is None or self.tablet is None:
+            return False
+        prof = store.ensure(self.tablet.name)
+        if self.tablet.source.value == "custom":
+            prof.tablet = {"width_mm": self.tablet.width_mm, "height_mm": self.tablet.height_mm,
+                           "report_rate_hz": self.tablet.max_report_rate_hz,
+                           "max_pressure": float(self.tablet.max_pressure)}
+        if self.display is not None:
+            d = self.display
+            prof.display = {"width_px": float(d.width_px), "height_px": float(d.height_px),
+                            "left": d.offset_x - d.width_px / 2, "top": d.offset_y - d.height_px / 2,
+                            "refresh_hz": d.refresh_hz}
+        p = self.prefs
+        prof.prefs = {"play_style": p.play_style.value, "map_preference": p.map_preference.value,
+                      "priority": p.priority.value, "skill_level": p.skill_level.value,
+                      "plugin_policy": p.plugin_policy.value, "notices_jitter": p.notices_jitter,
+                      "notices_input_lag": p.notices_input_lag}
+        if p.preferred_area_width_mm:
+            prof.prefs["preferred_area_width_mm"] = p.preferred_area_width_mm
+        prof.updated = profile_mod.now_stamp()
+        self.saved_profile = prof
+        return store.save()
+
+    def remember_settings(self, settings: dict, source: str, note: str = "") -> bool:
+        """Remember the area and filters of the target tablet in ``settings`` as a good setup."""
+        store = self.profile_store
+        if store is None or self.profile is None:
+            return False
+        name = self.profile.tablet_name
+        info = next((p for p in self.services.list_profiles(settings) if p.tablet_name == name), None)
+        if info is None:
+            return False
+        area = info.tablet_area
+        entry = profile_mod.SavedSetting(
+            profile_mod.now_stamp(), source,
+            {"width": area.width, "height": area.height, "x": area.x, "y": area.y, "rotation": area.rotation},
+            [{"path": f.path, "enabled": f.enabled, "settings": dict(f.settings)} for f in info.filters], note)
+        self.saved_profile = store.remember_setting(self.tablet.name if self.tablet else name, entry)
+        return store.save()
+
+    def remember_coach(self, rounds: int, gain_pct: float | None) -> bool:
+        """Remember how a coach session went (rounds played, how much the cost dropped)."""
+        store = self.profile_store
+        name = self.tablet.name if self.tablet else (self.profile.tablet_name if self.profile else None)
+        if store is None or not name or rounds < 1:
+            return False
+        store.remember_coach(name, rounds, gain_pct)
+        self.saved_profile = store.get(name)
+        return store.save()
+
+    def forget_profile(self, everything: bool = True) -> bool:
+        """Delete the saved profile(s). Returns False when the file could not be rewritten."""
+        store = self.profile_store
+        if store is None:
+            return False
+        store.forget(None if everything else (self.tablet.name if self.tablet else None))
+        self.saved_profile = None
+        return store.save()
+
+    def saved_candidates(self) -> list[Candidate]:
+        """The player's own last saved settings as options, skipping any that no longer fit.
+
+        An entry is skipped when its area does not fit the tablet, one of its enabled filters is not installed
+        any more, or it equals what OTD runs now (that one is the "keep current" option).
+        """
+        sp = self.saved_profile
+        if sp is None or self.display is None or self.tablet is None:
+            return []
+        display = self.otd_display()
+        display_area = Rect(display.width_px, display.height_px, display.offset_x, display.offset_y)
+        current = self.profile
+        out: list[Candidate] = []
+        for entry in sp.history:
+            if len(out) >= SAVED_CANDIDATES:
+                break
+            rect, filters = entry.rect(), entry.filter_configs()
+            if not areafit.area_fits(rect, self.tablet) or any(
+                    f.enabled and f.path not in self.filter_paths for f in filters):
+                continue
+            if current is not None and current.tablet_area == rect and current.filters == filters:
+                continue
+            latency, _unknown = recommend.chain_latency(filters, self.tablet.max_report_rate_hz,
+                                                        rect.width / display.width_px)
+            i = len(out)
+            out.append(Candidate(
+                id=f"saved:{i}", label_key=f"profile.candidate.saved{i}.label",
+                summary_key="profile.candidate.saved.summary",
+                changes=ProfileChanges(tablet_area=rect, display_area=display_area, filters=filters),
+                reasons=(Reason(f"profile.reason.saved_{entry.source}", {"date": entry.when[:10]}),),
+                est_added_latency_ms=latency, tags=("saved",)))
+        return out
+
+    def apply_saved_profile(self) -> bool:
+        """Fill tablet, display and answers from the saved profile; False when the tablet is not available."""
+        sp = self.saved_profile
+        if sp is None:
+            return False
+        key = tablet_db.normalize_name(sp.tablet_name)
+        choice = next((c for c in self.tablet_choices() if tablet_db.normalize_name(c.label) == key), None)
+        if choice is None:
+            return False
+        if choice.tablet is None and sp.tablet:
+            self.profile = choice.profile
+            self.set_custom_tablet(sp.tablet_name, sp.tablet["width_mm"], sp.tablet["height_mm"],
+                                   sp.tablet["report_rate_hz"], int(sp.tablet.get("max_pressure", 0)))
+        elif not self.select_choice(choice):
+            return False
+        if sp.display:
+            d = sp.display
+            self.set_display(int(d["width_px"]), int(d["height_px"]), d["left"], d["top"], d["refresh_hz"])
+        else:
+            self.detect_display()
+        p, saved = self.prefs, sp.prefs
+        for attr, enum in (("play_style", PlayStyle), ("map_preference", MapPreference),
+                           ("priority", Priority), ("skill_level", SkillLevel),
+                           ("plugin_policy", PluginPolicy)):
+            if attr in saved:
+                setattr(p, attr, enum(saved[attr]))
+        for attr in ("notices_jitter", "notices_input_lag", "preferred_area_width_mm"):
+            if attr in saved:
+                setattr(p, attr, saved[attr])
+        return self.tablet is not None and self.profile is not None and self.display is not None
+
+    def resume_from_profile(self) -> None:
+        """Skip the repeated steps: detect OTD, load the saved choices and land on "Probar ajustes"."""
+        if not self.accepted_disclaimer:
+            raise SessionError("core.error.accept_first")
+        if self.step is Step.WELCOME:
+            self.advance()
+        self.detect()
+        if not self.apply_saved_profile():
+            raise SessionError("core.error.no_saved_profile")
+        while self.step is not Step.TESTING:
+            self.history.append(self.step)
+            self.step = STEP_ORDER[STEP_ORDER.index(self.step) + 1]
+        self.ensure_candidates()
+
     @property
     def advanced(self) -> bool:
         """True in Advanced mode (technical cards visible)."""
@@ -314,7 +488,7 @@ class Session:
             Step.QUESTIONS: True,
             Step.BASELINE: True,
             Step.TESTING: self.chosen_id is not None if self.dry_run
-            else bool(self.results_with_reports()),
+            else bool(self.results_with_reports()) or self._chose_saved(),
             Step.RESULT: False,
         }
         return checks[self.step]
@@ -324,6 +498,8 @@ class Session:
         if not self.can_advance() or self.at_goal_launch:
             raise SessionError("core.error.cannot_advance")
         target = STEP_ORDER[STEP_ORDER.index(self.step) + 1]
+        if self.step is Step.QUESTIONS:
+            self._optional(self.remember_choices)
         if target is Step.TESTING:
             self.ensure_candidates()
         self.history.append(self.step)
@@ -360,6 +536,7 @@ class Session:
             self.profile = self._profile_for(self.tablet)
         self.otd_notice = self._optional(self.services.version_notice, settings)
         self.refresh_locations()
+        self.saved_profile = self._find_saved_profile()
 
     def _optional(self, fn: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
         """Call a decoration-only service; a failure is logged, never raised."""
@@ -512,7 +689,7 @@ class Session:
     # -------------------------------------------------------------- candidates
     def _current_fingerprint(self) -> str:
         return repr((self.tablet, self.display, self.prefs, tuple(self.baseline), self.profile,
-                     self.starting_preset_id))
+                     self.starting_preset_id, self._saved_signature()))
 
     def ensure_candidates(self) -> None:
         """Generate candidates unless they already match the current inputs."""
@@ -604,6 +781,7 @@ class Session:
         if not found:
             raise SessionError("core.error.no_candidates")
         found = list(found)
+        found = (self._optional(self.saved_candidates) or []) + found
         start = next((c for c in found if c.id == self.starting_preset_id), None)
         if start is not None:
             found.remove(start)
@@ -869,6 +1047,7 @@ class Session:
                 "core.error.preset", self.services.save_preset, self.config_dir, target.stem, settings,
                 overwrite=overwrite, destination=target.parent)
         self.log.append(f"preset: {self.preset_path}")
+        self._optional(self.remember_settings, settings, "wizard")
         return self.preset_path
 
     def apply_final(self, *, confirmed: bool) -> ApplyResult:
@@ -887,6 +1066,7 @@ class Session:
         if result.ok:
             self.applied = result
             self.live_candidate_id = best.id if best else None
+            self._optional(self.remember_settings, settings, "wizard")
         return result
 
     # ------------------------------------------------------------------ report

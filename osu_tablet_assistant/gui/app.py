@@ -57,6 +57,8 @@ def prepare_session(session: Session, app_dir: Path) -> None:
     session.app_config = load_config(path)
     session.app_config_path = path
     session.prefs.plugin_policy = PluginPolicy(session.app_config.plugin_policy)
+    from ..profile import PROFILE_FILE, ProfileStore
+    session.profile_store = ProfileStore(app_dir / PROFILE_FILE).load()
     session.data_cache_dir = app_dir / "data"
     session.data_bundle = session._optional(session.services.activate_data_cache, session.data_cache_dir)
 
@@ -96,9 +98,10 @@ class App:
         from tkinter import messagebox
         session = view.session   # type: ignore[attr-defined]
 
-        def kept(_settings: dict) -> None:
+        def kept(settings: dict) -> None:
             # Keep replaced settings.json: "restore my settings" must write the original back.
             session._wrote_settings = True
+            session._optional(session.remember_settings, settings, "live")
 
         try:
             from .companion import open_companion
@@ -111,12 +114,16 @@ class App:
         from tkinter import messagebox
         session = view.session   # type: ignore[attr-defined]
 
-        def kept(_settings: dict) -> None:
+        def kept(settings: dict) -> None:
             session._wrote_settings = True      # same reason as for the companion
+            session._optional(session.remember_settings, settings, "coach")
+
+        def summary(info: dict) -> None:
+            session._optional(session.remember_coach, info["rounds"], info.get("gain_pct"))
 
         try:
             from .coach import open_coach
-            open_coach(self.root, session, on_keep=kept)
+            open_coach(self.root, session, on_keep=kept, on_summary=summary)
         except Exception as exc:  # the window must never take the wizard down with it
             messagebox.showerror(t("gui.app.title"), str(exc), parent=self.root)
 

@@ -81,9 +81,10 @@ class CoachWindow:
                  translate: Translate | None = None, on_keep: Callable[[dict], None] | None = None,
                  on_close: Callable[[], None] | None = None, enable_hotkeys: bool = True,
                  hotkey_backend: hk.HotkeyBackend | None = None, beeper: hk.Beeper | None = None,
-                 settings: dict | None = None, **core_kwargs: Any) -> None:
+                 settings: dict | None = None, on_summary: Callable[[dict], None] | None = None,
+                 **core_kwargs: Any) -> None:
         self.t: Translate = translate or default_t
-        self.on_keep, self.on_close = on_keep, on_close
+        self.on_keep, self.on_close, self.on_summary = on_keep, on_close, on_summary
         self.core = core if core is not None else self._core_from_session(session, settings, **core_kwargs)
         self.beeper = beeper if beeper is not None else hk.Beeper()
         self._actions: queue.Queue[str] = queue.Queue()
@@ -401,8 +402,18 @@ class CoachWindow:
     def keep(self) -> None:
         fb = self.core.keep()
         self._notify(fb)
-        if fb.ok and self.on_keep is not None:
-            self.on_keep(self.core.tuner.settings)
+        if fb.ok:
+            self._report_summary()
+            if self.on_keep is not None:
+                self.on_keep(self.core.tuner.settings)
+
+    def _report_summary(self) -> None:
+        """Tell the owner how the session went (rounds and how much the cost dropped), once per Keep."""
+        if self.on_summary is None:
+            return
+        info = self.core.progress_summary()
+        if info is not None:
+            self.on_summary(info)
 
     # ------------------------------------------------------------------- loop
     def _tick(self) -> None:
@@ -478,6 +489,7 @@ class CoachWindow:
                 self._notify(fb)
                 if not fb.ok:
                     return
+                self._report_summary()
                 if self.on_keep is not None:
                     self.on_keep(self.core.tuner.settings)
             else:

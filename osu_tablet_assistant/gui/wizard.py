@@ -251,6 +251,7 @@ class WelcomePage(Page):
             notice = Notice(self)
             notice.pack(fill="x", pady=(0, self.gap()))
             notice.show(t("gui.welcome.dry_run"), "info")
+        self._build_saved_card()
         box = self.card(t("gui.welcome.goal_title"), t("gui.welcome.goal_help"))
         self._goal = tk.StringVar(value=s.goal)
         for goal in GOALS:
@@ -279,6 +280,36 @@ class WelcomePage(Page):
         accept = check(box.body, t("gui.welcome.accept"), self._accepted, command=self._toggle)
         accept.pack(anchor="w", pady=(px(self, 12), 0))
         self.after_idle(accept.focus_set)
+
+    def _build_saved_card(self) -> None:
+        """"Welcome back": the saved profile lets the player skip the questions and the baseline."""
+        store = self.session.profile_store
+        saved = store.latest() if store is not None else None
+        if saved is None or self.session.dry_run:
+            return
+        box = self.card(t("gui.welcome.back_title", tablet=saved.tablet_name), t("gui.welcome.back_help"),
+                        accent=COLORS.good)
+        last = saved.last
+        if last is not None:
+            WrapLabel(box.body, t("gui.welcome.back_last", date=last.when[:10],
+                                  source=t(f"gui.welcome.source.{last.source}")), "Body").pack(fill="x")
+        if saved.coach:
+            c = saved.coach[0]
+            gain = c.get("gain_pct")
+            WrapLabel(box.body, t("gui.welcome.back_coach", date=c["when"][:10], rounds=c["rounds"])
+                      + (" " + t("gui.welcome.back_gain", pct=f"{gain:.0f}") if gain else ""), "Small").pack(fill="x")
+        self._resume_notice = Notice(box.body)
+        self._resume_notice.pack(fill="x", pady=(px(self, 6), 0))
+        row = frame(box.body)
+        row.pack(fill="x", pady=(px(self, 8), 0))
+        button(row, t("gui.welcome.back_resume"), self._resume).pack(side="left")
+        label(row, t("gui.welcome.back_resume_note"), "Small").pack(side="left", padx=(px(self, 10), 0))
+
+    def _resume(self) -> None:
+        if not self.session.accepted_disclaimer:
+            self._resume_notice.show(t("core.error.accept_first"), "warn")
+            return
+        self.wizard.resume()
 
     def _choose(self) -> None:
         self.session.set_goal(self._goal.get())
@@ -952,7 +983,8 @@ class TestingPage(Page):
         done = s.is_complete(cand.id)
         self._btn_test.configure(state="disabled" if busy else "normal",
                                  text=t("gui.testing.repeat" if done else "gui.testing.test"))
-        self._btn_use.configure(state="normal" if (measured or not s.can_measure) and not busy else "disabled")
+        self._btn_use.configure(state="normal" if (measured or not s.can_measure or "saved" in cand.tags)
+                                and not busy else "disabled")
         self._btn_refine.configure(state="normal" if s.results_with_reports() and not busy else "disabled")
         self._btn_restore.configure(state="normal" if s.live_candidate_id and not busy else "disabled")
         for seg in self._rating_box.winfo_children():
@@ -1593,6 +1625,12 @@ class SettingsDialog(tk.Toplevel):
         label(upd.body, t("gui.settings.update_url"), "Strong").pack(anchor="w", pady=(px(self, 8), 2))
         self.url = tk.StringVar(value=cfg.update_url)
         ttk.Entry(upd.body, textvariable=self.url).pack(fill="x")
+        prof = Card(body, t("gui.settings.profile_title"), t("gui.settings.profile_help"))
+        prof.pack(fill="x", pady=(0, px(self, 12)))
+        self._profile_button = button(prof.body, t("gui.settings.profile_forget"), self._forget_profile, kind="secondary")
+        self._profile_button.pack(anchor="w")
+        if self.session.profile_store is None or not self.session.profile_store.profiles:
+            self._profile_button.configure(state="disabled")
         self.data = DataCard(body, wizard, settings_button=False)
         self.data.pack(fill="x", pady=(0, px(self, 12)))
         self.message = Notice(body)
@@ -1602,6 +1640,14 @@ class SettingsDialog(tk.Toplevel):
         button(actions, t("gui.settings.save"), self._save, kind="primary").pack(side="right")
         button(actions, t("gui.settings.close"), self.destroy, kind="ghost").pack(side="right", padx=px(self, 8))
         self.bind("<Escape>", lambda _e: self.destroy())
+
+    def _forget_profile(self) -> None:
+        if not messagebox.askyesno(t("gui.settings.profile_title"), t("gui.settings.profile_confirm"), parent=self):
+            return
+        ok = self.session.forget_profile()
+        self._profile_button.configure(state="disabled")
+        self.message.show(t("gui.settings.profile_forgotten" if ok else "gui.settings.profile_not_saved"),
+                          "success" if ok else "warn")
 
     def _browse(self) -> None:
         chosen = filedialog.askdirectory(parent=self, title=t("gui.save.pick_title"),
@@ -1790,6 +1836,17 @@ class Wizard(ttk.Frame):
                 return
         self.set_busy(True)
         run_in_thread(self, self.session.advance, lambda _s: self._moved(), self._move_failed)
+
+    def resume(self) -> None:
+        """Skip the repeated steps using the saved profile (detect OTD, load choices, open the test list)."""
+        self.clear_error()
+        self.set_busy(True)
+        run_in_thread(self, self.session.resume_from_profile, lambda _r: self._moved(), self._resume_failed)
+
+    def _resume_failed(self, exc: BaseException) -> None:
+        self.set_busy(False)
+        self.show_error(exc)
+        self.show_current()      # whatever step the attempt reached; the normal flow continues from there
 
     def launch_goal(self) -> None:
         """Open the live-tuning companion or the Play Coach on the current session."""

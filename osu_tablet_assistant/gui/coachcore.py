@@ -311,6 +311,16 @@ class CoachCore:
         return CoachFeedback(result.ok, (), Reason("play.msg.kept" if result.ok else result.message_key),
                              "keep" if result.ok else "error")
 
+    def progress_summary(self) -> dict | None:
+        """``{"rounds", "gain_pct"}``: rounds played and how much the cost fell from the first to the best one."""
+        done = opt.accepted_rounds(self.state)
+        if not self.state.rounds:
+            return None
+        gain = None
+        if len(done) >= 2 and done[0].cost:
+            gain = (done[0].cost - min(r.cost for r in done)) / done[0].cost * 100.0
+        return {"rounds": len(self.state.rounds), "gain_pct": gain}
+
     @property
     def dirty(self) -> bool:
         return self.tuner.dirty
