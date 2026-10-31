@@ -17,7 +17,7 @@ from ..engine.playtypes import CellStat, ObjectResult
 from ..models import DisplaySpec, PenSample, Rect, TabletSpec
 from .i18n import t
 from .mapgeometry import MapGeometry, cell_bounds, dot_color, heat_color, mix, playfield_uv
-from .widgets import COLORS, font, px, surface_color
+from .widgets import COLORS, canvas_round_rect, font, icon_image, px, surface_color
 
 MAX_DOTS = 300
 TRAIL_POINTS = 40
@@ -39,6 +39,7 @@ class TabletMap(tk.Canvas):
         self._dots: list[tuple[float, float, str]] = []     # (u, v, colour): where the pen was
         self._trail: list[tuple[float, float]] = []
         self._pen: tuple[float, float] | None = None
+        self._images: list = []        # antialiased bitmaps shown on the canvas (kept alive here)
         self.bind("<Configure>", lambda _e: self.redraw())
 
     # --- data
@@ -81,7 +82,14 @@ class TabletMap(tk.Canvas):
         width, height = max(self.winfo_width(), 2), max(self.winfo_height(), 2)
         caption_h = 0 if self.compact else px(self, 16)
         geo = MapGeometry(self._area, self._tablet, width, height - caption_h, px(self, 10))
-        self.create_polygon(*[v for p in geo.tablet_polygon() for v in p], fill=c.bg, outline=c.border_strong)
+        bg = str(self.cget("background"))
+        keep: list = []
+        polygon = geo.tablet_polygon()
+        xs, ys = sorted({round(p[0]) for p in polygon}), sorted({round(p[1]) for p in polygon})
+        if len(xs) == 2 and len(ys) == 2:          # axis-aligned tablet: a rounded body, like the real thing
+            canvas_round_rect(self, xs[0], ys[0], xs[1], ys[1], px(self, 8), c.field, bg, c.border_strong, keep=keep)
+        else:
+            self.create_polygon(*[v for p in polygon for v in p], fill=c.field, outline=c.border_strong)
         rows, cols = self._grid
         for cell in self._cells:
             u0, v0, u1, v1 = cell_bounds(cell.row, cell.col, rows, cols, self._display)
@@ -99,21 +107,24 @@ class TabletMap(tk.Canvas):
             x, y = geo.to_canvas(u, v)
             r = px(self, 2.5)
             self.create_oval(x - r, y - r, x + r, y + r, fill=color, outline="")
-        self._draw_trail(geo)
+        self._draw_trail(geo, keep)
+        self._images = keep
         if not self.compact:
-            self.create_text(width / 2, height - px(self, 2), anchor="s", fill=c.subtle, font=font("small"),
+            self.create_text(width / 2, height - px(self, 2), anchor="s", fill=c.muted, font=font("small"),
                              text=t("play.map.orientation"))
 
-    def _draw_trail(self, geo: MapGeometry) -> None:
+    def _draw_trail(self, geo: MapGeometry, keep: list) -> None:
         n = len(self._trail)
         for i in range(1, n):
             (x0, y0), (x1, y1) = geo.to_canvas(*self._trail[i - 1]), geo.to_canvas(*self._trail[i])
             k = i / n
-            self.create_line(x0, y0, x1, y1, fill=mix(COLORS.surface_3, COLORS.accent, k), width=max(1, round(px(self, 2) * k)))
+            self.create_line(x0, y0, x1, y1, fill=mix(COLORS.surface_3, COLORS.accent, k), width=max(1, round(px(self, 2) * k)),
+                             capstyle="round")
         if self._pen is not None:
             x, y = geo.to_canvas(*self._pen)
-            r = px(self, 4)
-            self.create_oval(x - r, y - r, x + r, y + r, fill=COLORS.accent, outline=COLORS.on_accent)
+            pen = icon_image(self, "dot", 14, COLORS.accent, COLORS.field)   # antialiased pen marker
+            keep.append(pen)
+            self.create_image(round(x), round(y), image=pen)
 
     def _arrow(self, cx: float, cy: float, ex_mm: float, ey_mm: float, geo: MapGeometry) -> None:
         """Error arrow of a cell: it points from where the object was towards where the cursor went."""

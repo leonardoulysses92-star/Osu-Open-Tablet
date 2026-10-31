@@ -10,7 +10,8 @@ from . import i18n
 from . import wizard as wizard_module
 from .i18n import t
 from .session import Session, display_from_tk
-from .widgets import COLORS, Chip, Tooltip, apply_theme, button, font, px, run_in_thread
+from .widgets import (COLORS, Chip, Tooltip, apply_theme, button, dark_title_bar, font, hairline, icon_image, px,
+                      run_in_thread, segmented)
 from .wizard import Wizard
 
 _LANGUAGE_NAMES = {"es": "Español", "en": "English"}
@@ -72,6 +73,7 @@ class App:
         self.session = session
         self.root = tk.Tk()
         apply_theme(self.root)
+        dark_title_bar(self.root)
         session.services.detect_display = lambda: display_from_tk(self.root)
         session.prefs.language = i18n.current_language()
         self._size_window()
@@ -141,44 +143,47 @@ class App:
         r.minsize(min_w, min_h)
 
     def _build_header(self) -> None:
+        """Glass strip: logo and title, then language switch, Simple/Advanced toggle and Settings."""
         c = COLORS
-        header = tk.Frame(self.root, background=c.surface)
+        header = ttk.Frame(self.root, style="Header.TFrame")
+        header.surface = "Card."            # type: ignore[attr-defined]  # widgets inside use the card variants
         header.pack(fill="x")
-        tk.Frame(self.root, height=1, background=c.border).pack(fill="x")
-        inner = tk.Frame(header, background=c.surface)
+        hairline(self.root)
+        inner = ttk.Frame(header, style="Header.TFrame")
         inner.pack(fill="x", padx=px(header, 24), pady=px(header, 12))
-        size = px(header, 34)
-        logo = tk.Canvas(inner, width=size, height=size, background=c.surface, highlightthickness=0)
-        logo.create_oval(2, 2, size - 2, size - 2, fill=c.accent, outline="")
-        logo.create_oval(size * 0.3, size * 0.3, size * 0.7, size * 0.7, outline=c.surface, width=3)
-        logo.pack(side="left")
-        titles = tk.Frame(inner, background=c.surface)
+        tk.Label(inner, image=icon_image(inner, "logo", 32, c.accent, c.surface), background=c.surface,
+                 borderwidth=0).pack(side="left")
+        titles = ttk.Frame(inner, style="Header.TFrame")
         titles.pack(side="left", padx=(px(header, 12), 0))
         self._title = tk.Label(titles, background=c.surface, foreground=c.text, font=font("heading"))
         self._title.pack(anchor="w")
         self._subtitle = tk.Label(titles, background=c.surface, foreground=c.muted, font=font("small"))
         self._subtitle.pack(anchor="w")
 
-        lang = tk.Frame(inner, background=c.surface)
-        lang.pack(side="right")
-        self._lang_label = tk.Label(lang, background=c.surface, foreground=c.muted, font=font("small"))
+        self._settings_button = button(inner, "", lambda: self.wizard.open_settings(), kind="ghost")
+        self._settings_button.pack(side="right")
+        tools = ttk.Frame(inner, style="Header.TFrame")
+        tools.pack(side="right", padx=(0, px(header, 12)))
+        self._lang_label = tk.Label(tools, background=c.surface, foreground=c.muted, font=font("small"))
         self._lang_label.pack(side="left", padx=(0, px(header, 8)))
         self._lang_var = tk.StringVar(value=i18n.current_language())
+        track = segmented(tools)
+        track.pack(side="left")
         for code in i18n.SUPPORTED:
-            option = ttk.Radiobutton(lang, text=code.upper(), value=code, variable=self._lang_var,
+            option = ttk.Radiobutton(track, text=code.upper(), value=code, variable=self._lang_var,
                                      command=self._on_language, style="Segment.Toolbutton", takefocus=True)
-            option.pack(side="left", padx=(0, 2))
+            option.pack(side="left")
             Tooltip(option, _LANGUAGE_NAMES[code])
         self._advanced_var = tk.BooleanVar(value=self.session.advanced)
-        self._advanced = ttk.Checkbutton(lang, variable=self._advanced_var, command=self._on_advanced, takefocus=True,
-                                         style="Segment.Toolbutton")
-        self._advanced.pack(side="left", padx=(px(header, 14), 0))
+        toggle = segmented(tools)
+        toggle.pack(side="left", padx=(px(header, 12), 0))
+        self._advanced = ttk.Checkbutton(toggle, variable=self._advanced_var, command=self._on_advanced,
+                                         takefocus=True, style="Segment.Toolbutton")
+        self._advanced.pack(side="left")
         Tooltip(self._advanced, lambda: t("gui.app.advanced_tip"))
-        self._settings_button = button(inner, "", lambda: self.wizard.open_settings(), kind="ghost")
-        self._settings_button.pack(side="right", padx=(0, px(header, 12)))
         if self.session.dry_run:
             self._dry_chip = Chip(inner, "", "info")
-            self._dry_chip.pack(side="right", padx=px(header, 16))
+            self._dry_chip.pack(side="right", padx=(0, px(header, 16)))
         else:
             self._dry_chip = None
 
@@ -187,7 +192,7 @@ class App:
         self._title.configure(text=t("gui.app.title"))
         self._subtitle.configure(text=t("gui.app.subtitle"))
         self._lang_label.configure(text=t("gui.app.language"))
-        self._settings_button.configure(text="⚙  " + t("gui.settings.open"))
+        self._settings_button.configure(text=t("gui.settings.open"))
         self._advanced.configure(text=t("gui.app.advanced"))
         if self._dry_chip is not None:
             self._dry_chip.set(t("gui.app.dry_run"), "info")

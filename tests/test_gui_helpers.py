@@ -48,8 +48,10 @@ def profile(area: Rect = Rect(100, 56.25, 108, 67.5), filters: tuple = ()) -> Pr
 
 class TokenTests(unittest.TestCase):
     def test_palette_matches_live_tests(self) -> None:
-        self.assertEqual(COLORS.bg, "#14161a")
-        self.assertEqual(COLORS.accent, "#ff66aa")
+        from osu_tablet_assistant.gui import companion, live_tests
+        self.assertEqual(COLORS.accent, "#ff66aa")          # osu! pink stays the single accent
+        self.assertEqual((live_tests.BG, live_tests.ACCENT), (COLORS.bg, COLORS.accent))
+        self.assertEqual((companion.BG, companion.ACCENT), (COLORS.bg, COLORS.accent))
 
     def test_roles_reference_existing_colors(self) -> None:
         for _font, color in LABEL_ROLES.values():

@@ -32,7 +32,7 @@ import tkinter as tk
 from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from tkinter import messagebox
+from tkinter import messagebox, ttk
 from typing import Any
 
 from ..engine import adapt
@@ -43,9 +43,12 @@ from ..models import DisplaySpec, Reason, TabletSpec
 from ..otd.livetune import (LiveTuner, OsuWatcher, SendOutcome, controller_sender, dry_run_sender)
 from . import hotkeys as hk
 from .i18n import t as default_t
+from .palette import COLORS, mix
+from .widgets import (FONT_FAMILY, Card, apply_theme, button, check, dark_title_bar, font, frame, label, px, radio,
+                      segmented, surface_color)
 
-BG, SURFACE, FG, MUTED, ACCENT, WARN = "#14161a", "#1f2229", "#f1f1f1", "#8b919c", "#ff66aa", "#ffb347"
-FONT = "Segoe UI"
+BG, SURFACE, FG, MUTED, ACCENT, WARN = COLORS.bg, COLORS.surface, COLORS.text, COLORS.muted, COLORS.accent, COLORS.warn
+FONT = FONT_FAMILY
 TICK_MS = 40
 SAMPLE_DRAIN_S = 0.5
 HINT_REFRESH_S = 2.0
@@ -272,10 +275,12 @@ class Overlay:
         self.hold_ms, self.fade_ms = hold_ms, fade_ms
         self.win = tk.Toplevel(master)
         self.win.overrideredirect(True)
-        self.win.configure(bg=BG, highlightthickness=2, highlightbackground=ACCENT)
+        # A glass panel: surface fill and a hairline tinted with the accent (no thick neon frame).
+        self.win.configure(bg=SURFACE, highlightthickness=1, highlightbackground=mix(COLORS.border_strong, ACCENT, 0.45),
+                           highlightcolor=mix(COLORS.border_strong, ACCENT, 0.45))
         self.win.attributes("-topmost", True)
         self._set_alpha(0.0)
-        self.label = tk.Label(self.win, text="", bg=BG, fg=FG, font=(FONT, 11), justify="left", padx=12, pady=8)
+        self.label = tk.Label(self.win, text="", bg=SURFACE, fg=FG, font=(FONT, 11), justify="left", padx=14, pady=10)
         self.label.pack()
         sw = self.win.winfo_screenwidth()
         self.win.geometry(f"+{max(sw - 420, 0)}+24")
@@ -373,8 +378,11 @@ class CompanionWindow:
 
         self.own_root = parent is None
         self.root = tk.Tk() if parent is None else tk.Toplevel(parent)
+        if parent is None:
+            apply_theme(self.root)
         self.root.title(self.t("companion.title"))
         self.root.configure(bg=BG)
+        dark_title_bar(self.root)
         self.root.minsize(880, 600)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self._build()
@@ -388,36 +396,37 @@ class CompanionWindow:
         self._job: str | None = self.root.after(TICK_MS, self._tick)
 
     # ----------------------------------------------------------------- build
+    # role of each (size, colour) pair the window uses -> named font of the shared type scale
+    _FONT_ROLE = {16: "title", 11: "heading", 10: "body", 9: "small", 8: "small"}
+
     def _label(self, parent: tk.Misc, key: str | None = None, size: int = 10, color: str = FG,
                bold: bool = False, var: tk.StringVar | None = None, wrap: int = 500) -> tk.Label:
-        lbl = tk.Label(parent, text=self.t(key) if key else "", textvariable=var, bg=parent["bg"], fg=color,
-                       font=(FONT, size, "bold" if bold else "normal"), justify="left", anchor="w",
-                       wraplength=wrap)
+        role = self._FONT_ROLE.get(size, "body")
+        if bold and role in ("body", "small"):
+            role = "strong" if role == "body" else "small_bold"
+        lbl = tk.Label(parent, text=self.t(key) if key else "", textvariable=var, bg=surface_color(parent), fg=color,
+                       font=font(role), justify="left", anchor="w", wraplength=px(parent, wrap))
         lbl.pack(fill="x", anchor="w")
         return lbl
 
     def _button(self, parent: tk.Misc, text: str, command: Callable[[], None], accent: bool = False,
-                big: bool = False) -> tk.Button:
-        return tk.Button(parent, text=text, command=command, bg=ACCENT if accent else SURFACE,
-                         fg=BG if accent else FG, activebackground=ACCENT, activeforeground=BG,
-                         relief="flat", bd=0, font=(FONT, 12 if big else 10, "bold" if big else "normal"),
-                         padx=10, pady=10 if big else 6, cursor="hand2", wraplength=230)
+                big: bool = False) -> ttk.Button:
+        return button(parent, text, command, kind="primary" if accent else "tile" if big else "secondary")
 
-    def _section(self, parent: tk.Misc, key: str) -> tk.Frame:
-        frame = tk.Frame(parent, bg=SURFACE, padx=12, pady=10)
-        frame.pack(fill="x", pady=(0, 10))
-        self._label(frame, key, 11, ACCENT, True, wrap=380)
-        return frame
+    def _section(self, parent: tk.Misc, key: str) -> ttk.Frame:
+        card = Card(parent, self.t(key), padding=14)
+        card.pack(fill="x", pady=(0, px(parent, 10)))
+        return card.body
 
     def _hint(self, action: str) -> str:
         text = self.hotkeys.bindings.get(action, "")
         return text.replace("+", " + ").title() if text else ""
 
     def _build(self) -> None:
-        outer = tk.Frame(self.root, bg=BG, padx=16, pady=12)
+        outer = ttk.Frame(self.root, padding=(px(self.root, 20), px(self.root, 14)))
         outer.pack(fill="both", expand=True)
         self.body = outer
-        self._label(outer, "companion.title", 16, ACCENT, True)
+        self._label(outer, "companion.title", 16)
         self.var_game = tk.StringVar()
         self.var_live = tk.StringVar()
         self._label(outer, var=self.var_game, color=MUTED)
@@ -426,61 +435,60 @@ class CompanionWindow:
             self._label(outer, "companion.dry_run", color=WARN)
         if self.session is not None and not self.own_root:
             self._button(outer, self.t("companion.open_coach"), self.open_coach).pack(anchor="w", pady=(6, 0))
-        cols = tk.Frame(outer, bg=BG)
-        cols.pack(fill="both", expand=True, pady=(8, 0))
-        left = tk.Frame(cols, bg=BG)
-        right = tk.Frame(cols, bg=BG)
-        left.grid(row=0, column=0, sticky="nsew", padx=(0, 8))
+        cols = frame(outer)
+        cols.pack(fill="both", expand=True, pady=(px(outer, 10), 0))
+        left = frame(cols)
+        right = frame(cols)
+        left.grid(row=0, column=0, sticky="nsew", padx=(0, px(outer, 10)))
         right.grid(row=0, column=1, sticky="nsew")
         cols.columnconfigure(0, weight=1, uniform="col")
         cols.columnconfigure(1, weight=1, uniform="col")
+        gap = px(outer, 3)
 
         feel = self._section(left, "companion.section.feel")
-        grid = tk.Frame(feel, bg=SURFACE)
-        grid.pack(fill="x", pady=(6, 0))
-        self.intent_buttons: dict[str, tk.Button] = {}
+        grid = frame(feel)
+        grid.pack(fill="x")
+        self.intent_buttons: dict[str, ttk.Button] = {}
         for i, action in enumerate(("smoother", "responsive", "precise", "looser")):
             text = f"{self.t(f'companion.action.{action}')}\n{self._hint(action)}"
             b = self._button(grid, text, lambda a=action: self.do(a), big=True)
-            b.grid(row=i // 2, column=i % 2, sticky="nsew", padx=3, pady=3)
+            b.grid(row=i // 2, column=i % 2, sticky="nsew", padx=gap, pady=gap)
             self.intent_buttons[action] = b
         grid.columnconfigure(0, weight=1)
         grid.columnconfigure(1, weight=1)
         self._label(feel, "companion.feel.help", 9, MUTED)
 
         area = self._section(left, "companion.section.area")
-        row = tk.Frame(area, bg=SURFACE)
-        row.pack(fill="x", pady=(6, 0))
+        row = frame(area)
+        row.pack(fill="x")
         for action in ("area_smaller", "area_bigger"):
             b = self._button(row, f"{self.t(f'companion.action.{action}')}  ({self._hint(action)})",
                              lambda a=action: self.do(a))
-            b.pack(side="left", expand=True, fill="x", padx=3)
+            b.pack(side="left", expand=True, fill="x", padx=gap)
             self.intent_buttons[action] = b
         self._label(area, "companion.area.help", 9, MUTED)
 
-        save = tk.Frame(left, bg=BG)
-        save.pack(fill="x", pady=(0, 10))
+        save = frame(left)
+        save.pack(fill="x", pady=(0, px(outer, 10)))
         self._button(save, f"{self.t('companion.action.undo')}  ({self._hint('undo')})",
-                     lambda: self.do("undo")).pack(side="left", expand=True, fill="x", padx=3)
+                     lambda: self.do("undo")).pack(side="left", expand=True, fill="x", padx=gap)
         self.keep_button = self._button(save, f"{self.t('companion.action.keep')}  ({self._hint('keep')})",
                                         lambda: self.do("keep"), accent=True)
-        self.keep_button.pack(side="left", expand=True, fill="x", padx=3)
+        self.keep_button.pack(side="left", expand=True, fill="x", padx=gap)
         self._button(save, self.t("companion.action.revert"), self.revert_all).pack(
-            side="left", expand=True, fill="x", padx=3)
+            side="left", expand=True, fill="x", padx=gap)
 
         poll = self._section(left, "companion.section.poll")
         self.var_motion = tk.StringVar(value="")
         self.var_rest = tk.StringVar(value="")
         for var, options, prefix in ((self.var_motion, adapt.POLL_MOTION, "motion"),
                                      (self.var_rest, adapt.POLL_REST, "rest")):
-            line = tk.Frame(poll, bg=SURFACE)
-            line.pack(fill="x", pady=2)
+            line = segmented(poll)
+            line.pack(fill="x", pady=(0, px(outer, 6)))
             for opt in options:
-                tk.Radiobutton(line, text=self.t(f"companion.poll.{prefix}.{opt}"), variable=var, value=opt,
-                               indicatoron=False, bg=BG, fg=FG, selectcolor=ACCENT, activebackground=ACCENT,
-                               relief="flat", bd=0, padx=10, pady=6, font=(FONT, 10)).pack(
-                    side="left", expand=True, fill="x", padx=2)
-        self._button(poll, self.t("companion.poll.send"), self.send_poll).pack(fill="x", pady=(6, 0))
+                ttk.Radiobutton(line, text=self.t(f"companion.poll.{prefix}.{opt}"), variable=var, value=opt,
+                                style="Segment.Toolbutton", takefocus=True).pack(side="left", expand=True, fill="x")
+        self._button(poll, self.t("companion.poll.send"), self.send_poll).pack(fill="x", pady=(px(outer, 2), 0))
 
         live = self._section(right, "companion.section.live")
         self.var_values = tk.StringVar()
@@ -493,27 +501,21 @@ class CompanionWindow:
         pol = self._section(right, "companion.section.policy")
         self.var_policy = tk.StringVar(value=self.core.policy.mode.value)
         for mode in PolicyMode:
-            tk.Radiobutton(pol, text=self.t(f"companion.policy.{mode.value}"), variable=self.var_policy,
-                           value=mode.value, command=self._policy_changed, bg=SURFACE, fg=FG,
-                           selectcolor=BG, activebackground=SURFACE, activeforeground=ACCENT,
-                           anchor="w", font=(FONT, 10)).pack(fill="x")
+            radio(pol, self.t(f"companion.policy.{mode.value}"), mode.value, self.var_policy,
+                  command=self._policy_changed).pack(anchor="w")
 
         opts = self._section(right, "companion.section.options")
         self.var_sound = tk.BooleanVar(value=self.beeper.enabled)
-        tk.Checkbutton(opts, text=self.t("companion.option.sound"), variable=self.var_sound,
-                       command=self._sound_changed, bg=SURFACE, fg=FG, selectcolor=BG,
-                       activebackground=SURFACE, anchor="w", font=(FONT, 10)).pack(fill="x")
+        check(opts, self.t("companion.option.sound"), self.var_sound, command=self._sound_changed).pack(anchor="w")
         self.var_keys = tk.StringVar()
         self._label(opts, var=self.var_keys, size=9, color=MUTED, wrap=380)
         self.binding_vars: dict[str, tk.StringVar] = {}
-        self.keys_frame = keys = tk.Frame(opts, bg=SURFACE)
+        self.keys_frame = keys = frame(opts)
         self._button(opts, self.t("companion.hotkeys.edit"), self.toggle_bindings).pack(fill="x", pady=(4, 0))
         for i, action in enumerate(hk.ACTIONS):
-            tk.Label(keys, text=self.t(f"companion.action.{action}"), bg=SURFACE, fg=MUTED,
-                     font=(FONT, 9), anchor="w").grid(row=i, column=0, sticky="w")
+            label(keys, self.t(f"companion.action.{action}"), "Small").grid(row=i, column=0, sticky="w")
             var = tk.StringVar(value=self.hotkeys.bindings.get(action, ""))
-            tk.Entry(keys, textvariable=var, width=22, bg=BG, fg=FG, insertbackground=FG, relief="flat",
-                     font=(FONT, 9)).grid(row=i, column=1, sticky="ew", padx=4, pady=1)
+            ttk.Entry(keys, textvariable=var, width=22).grid(row=i, column=1, sticky="ew", padx=4, pady=1)
             self.binding_vars[action] = var
         keys.columnconfigure(1, weight=1)
         self._button(keys, self.t("companion.hotkeys.apply"), self.apply_bindings).grid(

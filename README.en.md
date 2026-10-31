@@ -4,6 +4,10 @@
 
 A guided assistant for osu! players that helps you configure [OpenTabletDriver](https://opentabletdriver.net) (OTD): the size and aspect ratio of the tablet area, and the smoothing filters. It works with any tablet that OTD supports. It measures your tablet with short live tests, compares the result with setups published by top players and the community (with their sources), and explains every recommendation.
 
+![The "Try settings" screen](docs/screenshots/08-testing-en-125.png)
+
+More real screenshots (100 %, 125 % and 150 % scaling) are in [docs/screenshots](docs/screenshots); the design and how to tune it are in [docs/DESIGN.md](docs/DESIGN.md).
+
 ## What it does
 
 The assistant takes you through these steps:

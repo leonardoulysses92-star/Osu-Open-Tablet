@@ -96,8 +96,9 @@ class GuiSmokeTests(unittest.TestCase):
         self.assertTrue(page._tree.set("balanced", "status").startswith("Probada"))
         s.set_rating("balanced", 4)
         page._refresh_rows()
-        self.assertTrue(page._tree.set("balanced", "result").endswith("★4"))
-        self.assertEqual(page._tree.set("balanced", "label")[:1], "★")   # the only complete option wins
+        self.assertTrue(page._tree.set("balanced", "result").endswith("4/5"))
+        self.assertIn("top", page._tree.item("balanced", "tags"))       # the only complete option wins
+        self.assertTrue(page._tree.item("balanced", "image"))           # ... and carries the dot marker
         for lang in i18n.SUPPORTED:
             i18n.set_language(lang)
             page._refresh_rows()

@@ -132,14 +132,15 @@ class GoalGuiTests(unittest.TestCase):
         self.assertEqual(len(app.wizard.visible_steps()), 4)
 
     def test_the_whole_card_is_clickable_and_the_chosen_one_is_highlighted(self) -> None:
-        from osu_tablet_assistant.gui.widgets import COLORS
         app = self.app()
         page = app.wizard.page
         page._goal_cards["live"].event_generate("<Button-1>")
         app.root.update()
         self.assertEqual(self.session.goal, "live")
-        self.assertEqual(str(page._goal_cards["live"].cget("highlightbackground")), COLORS.accent)
-        self.assertNotEqual(str(page._goal_cards["guided"].cget("highlightbackground")), COLORS.accent)
+        self.assertTrue(page._goal_cards["live"].selected)
+        self.assertFalse(page._goal_cards["guided"].selected)
+        self.assertNotEqual(str(page._goal_cards["live"].cget("style")),
+                            str(page._goal_cards["guided"].cget("style")))   # the accent border is a style
 
     def test_coach_path_opens_the_coach_from_the_display_step(self) -> None:
         app = self.app()

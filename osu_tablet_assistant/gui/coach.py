@@ -36,7 +36,8 @@ from .coachcore import (ANALYSIS_EVERY_S, PHASES, CoachCore, CoachFeedback, Read
 from .companion import companion_args_from_session, make_click_through
 from .i18n import t as default_t
 from .tabletmap import TabletMap
-from .widgets import COLORS, Card, Chip, Expander, Notice, WrapLabel, apply_theme, bullets, button, check, frame, label, px
+from .widgets import (COLORS, Card, Chip, Expander, Notice, WrapLabel, apply_theme, bullets, button, check,
+                      dark_title_bar, frame, icon_image, label, px, surface_color)
 
 TICK_MS = 100
 COACH_HOTKEY = "ctrl+alt+p"
@@ -104,6 +105,7 @@ class CoachWindow:
             apply_theme(self.root)
         self.root.title(self.t("play.title"))
         self.root.configure(bg=COLORS.bg)
+        dark_title_bar(self.root)
         self.root.protocol("WM_DELETE_WINDOW", self.close)
         self._geometry_before_observe: str | None = None
         self.body: ttk.Frame | None = None
@@ -232,7 +234,9 @@ class CoachWindow:
     def _check_row(self, parent: tk.Misc, ok: bool, text: str) -> None:
         row = frame(parent)
         row.pack(fill="x", pady=1)
-        label(row, "✓" if ok else "✕", "Good" if ok else "Warn").pack(side="left")
+        mark = icon_image(row, "success" if ok else "warn", 16, COLORS.good if ok else COLORS.warn,
+                          surface_color(row))
+        tk.Label(row, image=mark, background=surface_color(row), borderwidth=0).pack(side="left")
         label(row, text, "Body").pack(side="left", padx=(px(self.root, 8), 0))
 
     def _pick_map(self) -> None:

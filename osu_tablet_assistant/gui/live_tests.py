@@ -30,6 +30,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Sequence
 
 from osu_tablet_assistant.engine import metrics
+from osu_tablet_assistant.gui.palette import COLORS
 from osu_tablet_assistant.gui.pen_sampler import PenSampler
 from osu_tablet_assistant.models import DisplaySpec, MetricsReport, PenSample
 
@@ -451,7 +452,8 @@ def build_report(kind: str, mm_per_px: float, samples: Sequence[PenSample], *, s
 # --------------------------------------------------------------------------
 # tkinter front-end
 # --------------------------------------------------------------------------
-BG, FG, MUTED, ACCENT = "#14161a", "#f1f1f1", "#8b919c", "#ff66aa"
+# Colours come from the shared palette (only the chrome follows the design; geometry and timing do not change).
+BG, FG, MUTED, ACCENT = COLORS.bg, COLORS.text, COLORS.muted, COLORS.accent
 FLASH = "#ffffff"
 FONT = "Segoe UI"
 

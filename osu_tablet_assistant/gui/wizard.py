@@ -61,6 +61,7 @@ from .widgets import (
     Expander,
     InfoTip,
     Notice,
+    RoundedFrame,
     ScrollFrame,
     Stepper,
     Tooltip,
@@ -68,13 +69,17 @@ from .widgets import (
     bullets,
     button,
     check,
+    dark_title_bar,
     font,
     frame,
+    hairline,
+    icon_image,
     label,
     parse_float,
     px,
     radio,
     run_in_thread,
+    segmented,
 )
 
 _GAP = 16          # vertical space between cards (96-dpi px)
@@ -255,31 +260,30 @@ class WelcomePage(Page):
         self._build_saved_card()
         box = self.card(t("gui.welcome.goal_title"), t("gui.welcome.goal_help"))
         self._goal = tk.StringVar(value=s.goal)
-        self._goal_cards: dict[str, tk.Frame] = {}
+        self._goal_cards: dict[str, RoundedFrame] = {}
         for goal in GOALS:
-            # the whole card is the click target; the radio inside keeps keyboard and screen-reader access
-            row = tk.Frame(box.body, background=COLORS.surface, highlightthickness=2, cursor="hand2",
-                           highlightbackground=COLORS.border, highlightcolor=COLORS.accent)
+            # the whole tile is the click target; the radio inside keeps keyboard and screen-reader access
+            row = RoundedFrame(box.body, padding=(px(self, 14), px(self, 12)), radius=12)
+            row.configure(cursor="hand2")
             row.pack(fill="x", pady=(0, px(self, 8)))
-            inner = frame(row)
-            inner.pack(fill="x", padx=px(self, 12), pady=px(self, 10))
-            top = frame(inner)
+            top = frame(row)
             top.pack(fill="x")
             radio(top, t(f"gui.welcome.goal.{goal}.title"), goal, self._goal, command=self._choose).pack(side="left")
             if goal == "guided":
                 Chip(top, t("gui.welcome.recommended"), "accent").pack(side="left", padx=(px(self, 8), 0))
-            text = WrapLabel(inner, t(f"gui.welcome.goal.{goal}.text"), "Muted")
-            text.pack(fill="x", padx=(px(self, 24), 0))
-            for widget in (row, inner, top, text):
+            text = WrapLabel(row, t(f"gui.welcome.goal.{goal}.text"), "Muted")
+            text.pack(fill="x", padx=(px(self, 25), 0))
+            for widget in (row, top, text):
                 widget.bind("<Button-1>", lambda _e, g=goal: self._pick_goal(g), add="+")
+            row.bind("<Enter>", lambda _e, r=row: r.set_hover(True), add="+")
+            row.bind("<Leave>", lambda _e, r=row: r.set_hover(False), add="+")
             self._goal_cards[goal] = row
         self._paint_goals()
         if s.advanced:       # the long explanation and the community data are Advanced-mode content
             steps = self.card(t("gui.welcome.steps_title"))
             steps.body.columnconfigure(1, weight=1)
             for index in range(1, 6):
-                badge = tk.Label(steps.body, text=str(index), bg=COLORS.accent_soft, fg=COLORS.accent,
-                                 width=2, font=font("small_bold"))
+                badge = Chip(steps.body, str(index), "accent")
                 badge.grid(row=index, column=0, sticky="nw", padx=(0, px(self, 12)), pady=px(self, 4))
                 WrapLabel(steps.body, t(f"gui.welcome.step{index}")).grid(
                     row=index, column=1, sticky="we", pady=px(self, 4))
@@ -289,7 +293,9 @@ class WelcomePage(Page):
         self._accepted = tk.BooleanVar(value=s.accepted_disclaimer)
         accept = check(box.body, t("gui.welcome.accept"), self._accepted, command=self._toggle)
         accept.pack(anchor="w", pady=(px(self, 12), 0))
-        self.after_idle(accept.focus_set)
+        # the page may be rebuilt (language switch) or the window closed before idle time
+        job = self.after_idle(accept.focus_set)
+        self.bind("<Destroy>", lambda e: self.after_cancel(job) if e.widget is self else None, add="+")
 
     def _build_saved_card(self) -> None:
         """"Welcome back": the saved profile lets the player skip the questions and the baseline."""
@@ -328,7 +334,7 @@ class WelcomePage(Page):
     def _paint_goals(self) -> None:
         """Accent border on the chosen path."""
         for goal, card in self._goal_cards.items():
-            card.configure(highlightbackground=COLORS.accent if goal == self._goal.get() else COLORS.border)
+            card.set_selected(goal == self._goal.get())
 
     def _choose(self) -> None:
         self.session.set_goal(self._goal.get())
@@ -368,7 +374,7 @@ class DetectPage(Page):
             side="left", padx=(px(self, 8), 0))
         button(row, t("gui.detect.pick_install"), lambda: self._pick(False), kind="ghost").pack(
             side="left", padx=(px(self, 4), 0))
-        label(self, "\U0001f512  " + t("gui.detect.safe_note"), "Small").pack(anchor="w")
+        WrapLabel(self, t("gui.detect.safe_note"), "Small").pack(fill="x")
         self._details = Expander(self, t("gui.details.log"))
         self._details.pack(fill="x", pady=(px(self, 8), 0))
         if self.session.settings is None:
@@ -480,7 +486,7 @@ class TabletPage(Page):
                                   show="headings", height=8, selectmode="browse")
         for col, key, width in (("name", "gui.tablet.col.name", 240), ("area", "gui.tablet.col.area", 130),
                                 ("rate", "gui.tablet.col.rate", 90), ("source", "gui.tablet.col.source", 190)):
-            self._tree.heading(col, text=t(key))
+            self._tree.heading(col, text=t(key), anchor="w")
             self._tree.column(col, width=px(self, width), anchor="w", stretch=col in ("name", "source"))
         bar = ttk.Scrollbar(holder, orient="vertical", command=self._tree.yview)
         self._tree.configure(yscrollcommand=bar.set)
@@ -816,7 +822,7 @@ class BaselinePage(Page):
         report = self.session.baseline_report(kind)
         run, chip, result = self._rows[kind]
         if report:
-            chip.set("✓ " + t("gui.baseline.done"), "success")
+            chip.set(t("gui.baseline.done"), "success")
             result.configure(text=" · ".join(metric_lines([report])))
             run.configure(text=t("gui.baseline.rerun"), style="Secondary.TButton")
         else:
@@ -865,17 +871,22 @@ class TestingPage(Page):
         columns.pack(fill="x")
         left = self.card(t("gui.testing.options_title"), parent=columns)
         columns.add(left)
-        self._tree = ttk.Treeview(left.body, columns=("label", "status", "result"),
-                                  show="headings", height=7, selectmode="browse")
-        for col, key, width in (("label", "gui.testing.col.option", 170), ("status", "gui.testing.col.status", 96),
-                                ("result", "gui.testing.col.result", 100)):
-            self._tree.heading(col, text=t(key))
+        # column #0 holds the marker of the best options (a small accent dot, see _refresh_rows)
+        self._tree = ttk.Treeview(left.body, columns=("label", "status", "result"), style="Marked.Treeview",
+                                  show=("tree", "headings"), height=7, selectmode="browse")
+        self._tree.column("#0", width=px(self, 22), minwidth=px(self, 22), stretch=False, anchor="center")
+        self._top_mark = (icon_image(self._tree, "dot", 12, COLORS.accent, COLORS.surface), "selected",
+                          icon_image(self._tree, "dot", 12, COLORS.accent, COLORS.accent_soft))
+        for col, key, width in (("label", "gui.testing.col.option", 160), ("status", "gui.testing.col.status", 96),
+                                ("result", "gui.testing.col.result", 108)):
+            self._tree.heading(col, text=t(key), anchor="w")
             self._tree.column(col, width=px(self, width), anchor="w", stretch=col == "label",
                               minwidth=px(self, 40))
         self._tree.pack(fill="both", expand=True)
         for tag, color in (("excellent", COLORS.good), ("good", COLORS.good), ("weak", COLORS.warn),
-                           ("incomplete", COLORS.subtle)):
+                           ("incomplete", COLORS.muted)):
             self._tree.tag_configure(tag, foreground=color)
+        self._tree.tag_configure("top", font=font("strong"))
         self._tree.bind("<<TreeviewSelect>>", lambda _e: self._show_detail())
         self._tie_note = WrapLabel(left.body, "", "Small")
         if s.can_measure:
@@ -894,12 +905,12 @@ class TestingPage(Page):
         if s.can_measure:
             self._rating_box.pack(fill="x", pady=(px(self, 12), 0))
             label(self._rating_box, t("gui.testing.rating_title"), "Strong").pack(anchor="w")
-            seg = frame(self._rating_box)
-            seg.pack(anchor="w", pady=(px(self, 6), px(self, 4)))
+            seg = segmented(self._rating_box)
+            seg.pack(anchor="w", pady=(px(self, 6), px(self, 6)))
             for n in range(0, 6):
                 ttk.Radiobutton(seg, text=str(n) if n else t("gui.testing.rating_none"), value=n,
                                 variable=self._rating, command=self._on_rating,
-                                style="Segment.Toolbutton", takefocus=True).pack(side="left", padx=(0, 2))
+                                style="Segment.Toolbutton", takefocus=True).pack(side="left")
             WrapLabel(self._rating_box, t("gui.testing.rating_help"), "Small").pack(fill="x")
         self._buttons = self.actions()
         self._btn_test = button(self._buttons, t("gui.testing.test"), self._on_test, kind="primary")
@@ -945,7 +956,7 @@ class TestingPage(Page):
             return None
 
     def _result_text(self, cand: Candidate, verdict: Any) -> str:
-        """Grade in words, "—" while incomplete, plus ★n only when the player rated it."""
+        """Grade in words, "—" while incomplete, plus "n/5" only when the player rated it."""
         result = self.session.results.get(cand.id)
         info = verdict.summaries.get(cand.id) if verdict is not None else None
         if info is None or not result or not result.reports:
@@ -955,7 +966,7 @@ class TestingPage(Page):
         else:
             text = t(f"gui.testing.grade.{info.grade}")
         if result and result.user_rating:
-            text = f"{text}  ★{result.user_rating}".strip()
+            text = f"{text} · {result.user_rating}/5" if text else f"{result.user_rating}/5"
         return text
 
     def _refresh_rows(self) -> None:
@@ -965,11 +976,11 @@ class TestingPage(Page):
         keep = self._tree.selection()
         self._tree.delete(*self._tree.get_children())
         for cand in s.candidates:
-            star = "★ " if cand.id in top else ""
             info = verdict.summaries.get(cand.id) if verdict is not None else None
             tag = "" if info is None or cand.id not in s.results else (info.grade or "incomplete")
-            self._tree.insert("", "end", iid=cand.id, tags=(tag,) if tag else (),
-                              values=(star + candidate_label(s, cand), self._status_of(cand),
+            tags = tuple(x for x in (tag, "top" if cand.id in top else "") if x)
+            self._tree.insert("", "end", iid=cand.id, tags=tags, image=self._top_mark if cand.id in top else "",
+                              values=(candidate_label(s, cand), self._status_of(cand),
                                       self._result_text(cand, verdict)))
         if keep and self._tree.exists(keep[0]):
             self._tree.selection_set(keep[0])
@@ -1306,7 +1317,7 @@ class ResultsView(ttk.Frame):
         if s.chosen_id == best.id:
             Chip(chips, t("gui.result.chip_chosen"), "accent").pack(side="left", padx=(0, 6))
         if result is not None and result.reports:
-            Chip(chips, "✓ " + t("gui.result.chip_measured"), "success").pack(side="left", padx=(0, 6))
+            Chip(chips, t("gui.result.chip_measured"), "success").pack(side="left", padx=(0, 6))
         if result is not None and result.user_rating:
             Chip(chips, t("gui.result.chip_rating", n=result.user_rating)).pack(side="left", padx=(0, 6))
         WrapLabel(body, t(best.summary_key), "Muted").pack(fill="x")
@@ -1321,21 +1332,24 @@ class ResultsView(ttk.Frame):
             if len(reasons) > _SHOWN_REASONS:
                 more = bullets(body, reasons[_SHOWN_REASONS:], role="Muted")
                 hidden = len(reasons) - _SHOWN_REASONS
-                toggle = button(body, "▸  " + t("gui.result.more_reasons", n=hidden), lambda: None,
-                                kind="ghost")
+                toggle = button(body, t("gui.result.more_reasons", n=hidden), lambda: None, kind="ghost",
+                                icon="chevron_right")
                 toggle.pack(anchor="w", pady=(px(self, 2), 0))
 
                 def flip() -> None:
                     if more.winfo_manager():
                         more.pack_forget()
-                        toggle.configure(text="▸  " + t("gui.result.more_reasons", n=hidden))
+                        toggle.configure(text=t("gui.result.more_reasons", n=hidden))
+                        toggle.set_icon("chevron_right")
                     else:
                         more.pack(fill="x", before=toggle)
-                        toggle.configure(text="▾  " + t("gui.result.fewer_reasons"))
+                        toggle.configure(text=t("gui.result.fewer_reasons"))
+                        toggle.set_icon("chevron_down")
 
                 toggle.configure(command=flip)
         if s.dry_run:
             WrapLabel(body, t("gui.result.dry_run_note"), "Small").pack(fill="x", pady=(px(self, 12), 0))
+        # main actions first; the quieter ones get their own row so nothing is clipped on narrow windows
         row = frame(body)
         row.pack(fill="x", pady=(px(self, 16), 0))
         self.buttons: list[ttk.Button] = []
@@ -1344,25 +1358,27 @@ class ResultsView(ttk.Frame):
             self.buttons.append(button(row, t("gui.result.save_preset"), self.page._on_preset))
         else:
             self.buttons.append(button(row, t("gui.result.save_preset"), self.page._on_preset, kind="primary"))
-        self.buttons.append(button(row, t("gui.result.copy"), self.page._on_copy, kind="ghost"))
+        target = s.output_dir or (s.config_dir / "Presets" if s.config_dir else None)
+        if target is not None:
+            WrapLabel(body, t("gui.result.save_where", path=str(target)), "Small").pack(
+                fill="x", pady=(px(self, 8), 0))
+        more = frame(body)
+        more.pack(fill="x", pady=(px(self, 10), 0))
+        self.buttons.append(button(more, t("gui.result.copy"), self.page._on_copy, kind="ghost"))
         if s.can_measure:
-            self.buttons.append(button(row, t("gui.result.restore"), self.page._on_restore, kind="ghost"))
+            self.buttons.append(button(more, t("gui.result.restore"), self.page._on_restore, kind="ghost"))
         self.companion_button: ttk.Button | None = None
         self.coach_button: ttk.Button | None = None
         launcher = COMPANION_LAUNCHER   # EXTENSION POINT (see COMPANION_LAUNCHER above)
         if launcher is not None:
-            self.companion_button = button(row, t("gui.result.companion"), lambda: launcher(self), kind="ghost")
+            self.companion_button = button(more, t("gui.result.companion"), lambda: launcher(self), kind="ghost")
             self.buttons.append(self.companion_button)
         coach_launcher = COACH_LAUNCHER
         if coach_launcher is not None:
-            self.coach_button = button(row, t("gui.result.coach"), lambda: coach_launcher(self), kind="ghost")
+            self.coach_button = button(more, t("gui.result.coach"), lambda: coach_launcher(self), kind="ghost")
             self.buttons.append(self.coach_button)
-        target = s.output_dir or (s.config_dir / "Presets" if s.config_dir else None)
-        if target is not None:
-            WrapLabel(body, t("gui.result.save_where", path=str(target)), "Small").pack(
-                fill="x", pady=(px(self, 8), 0), after=row)
         for btn in self.buttons:
-            btn.pack(side="left", padx=(0, px(self, 8)))
+            btn.pack(side="left", padx=(0, px(self, 8 if btn.master is row else 2)))
 
     def _build_comparison(self) -> None:
         rows = comparison_for(self.session, self.best)
@@ -1556,7 +1572,8 @@ class SaveDialog(tk.Toplevel):
         self.title(t("gui.save.title"))
         self.transient(page.winfo_toplevel())
         self.configure(background=COLORS.bg)
-        body = ttk.Frame(self, padding=px(self, 20))
+        dark_title_bar(self)
+        body = ttk.Frame(self, padding=px(self, 24))
         body.pack(fill="both", expand=True)
         WrapLabel(body, t("gui.save.intro")).pack(fill="x")
         label(body, t("gui.save.name"), "Strong").pack(anchor="w", pady=(px(self, 12), px(self, 4)))
@@ -1621,8 +1638,12 @@ class SettingsDialog(tk.Toplevel):
         self.title(t("gui.settings.title"))
         self.transient(wizard.winfo_toplevel())
         self.configure(background=COLORS.bg)
+        dark_title_bar(self)
         scroll = ScrollFrame(self, max_width=px(self, 760))
         scroll.pack(fill="both", expand=True)
+        width = min(px(self, 780), int(self.winfo_screenwidth() * 0.9))
+        height = min(px(self, 760), int(self.winfo_screenheight() * 0.85))
+        self.geometry(f"{width}x{height}")      # the scroll area has no natural size of its own
         body = ttk.Frame(scroll.body, padding=px(self, 20))
         body.pack(fill="both", expand=True)
         out = Card(body, t("gui.settings.output_title"), t("gui.settings.output_help"))
@@ -1731,10 +1752,10 @@ class Wizard(ttk.Frame):
         top.pack(fill="x")
         self.indicator = Stepper(top)
         self.indicator.pack(fill="x")
-        tk.Frame(self, height=1, background=COLORS.border).pack(fill="x")
+        hairline(self)
         footer = ttk.Frame(self, padding=(px(self, 24), px(self, 12)))
         footer.pack(side="bottom", fill="x")
-        tk.Frame(self, height=1, background=COLORS.border).pack(side="bottom", fill="x")
+        hairline(self, side="bottom")
         self._counter = label(footer, "", "Small")
         self._counter.pack(side="left")
         self._progress = ttk.Progressbar(footer, mode="indeterminate", length=px(self, 120),
@@ -1799,8 +1820,8 @@ class Wizard(ttk.Frame):
         """Refresh Back/Next labels and enabled state."""
         if self.page is None:
             return
-        self._back.configure(text="←  " + t("gui.nav.back"))
-        self._next.configure(text=self.page.next_label() + "  →")
+        self._back.configure(text=t("gui.nav.back"))
+        self._next.configure(text=self.page.next_label())
         can_back = self.session.can_go_back() or self.slot is not None
         self._back.configure(state="normal" if can_back and not self._busy else "disabled")
         self._next.configure(state="normal" if self.page.next_enabled() and not self._busy else "disabled")
