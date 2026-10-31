@@ -27,6 +27,46 @@ Hits and misses are **inferred**:
 
 Only circles and slider heads are judged.
 
+## Seeing the real game: replays (`.osr`)
+
+The only way to see what osu! itself recorded, without touching its memory, is the replay file it writes after
+a play. `engine/replay.py` reads it **only when the player picks it** ("Use a replay (.osr)" on the prepare
+screen, "Check with the replay" on the report):
+
+* **As a round**: positions and clicks are exact (no key polling, no screen-transform guess for timing), so the
+  round is as good as the data can be. It also works where the click keys cannot be read.
+* **As a check** of a live round: the per-object hit / not-hit verdicts the coach inferred are compared with the
+  ones from the replay, and the real accuracy (from the replay's hit counts) is shown. If they agree on 90 % or
+  more the inference can be trusted; if not, use the replay as the round.
+* The replay's map MD5 is compared with the `.osu` file; a mismatch is shown, not hidden.
+
+Limits: osu! does not keep a replay of every play (for example some fails); the replay positions are mapped with
+the same playfield approximation as the live recorder; osu!lazer replays have extra data and were not tested;
+the parser was only tested with **synthetic** files written to the documented format, not with real ones.
+
+## What is collected (and what is not)
+
+The same list is shown in the app (prepare screen and Settings):
+
+| Data | Why | Where it stays |
+|---|---|---|
+| Cursor position while observing | see how far the pen reaches | memory, erased on close |
+| Press times of the configured click keys only | match clicks to the map | memory |
+| Title of osu!'s own window | find the map | not stored; no other window is read |
+| The `.osu` of the map | know where the circles are | not copied |
+| A replay, only if you pick it: positions, clicks, mods, hit counts | exact data | memory; name, score, hash and date are discarded |
+| Your tablet, screen, answers and last saved settings | not repeat the procedure | `profile.json` on this PC, deletable in Settings |
+
+Never: osu!'s memory, other keys, other windows, your name or score, anything over the internet.
+
+## Your saved profile
+
+`profile.py` keeps, per tablet, what you chose (tablet, screen, answers) and your last 12 saved settings (area
+and filters, with date and source). "Continue with my profile" on the welcome screen detects OTD, loads those
+choices and lands on "Test settings", skipping the questions and the baseline; your saved settings appear first
+as options (skipped if the area no longer fits, a filter is no longer installed, or it equals what OTD runs now)
+and can be used without measuring. No play data is ever written there.
+
 ## Coordinate systems
 
 * **desktop pixels**: what `GetCursorPos` returns;

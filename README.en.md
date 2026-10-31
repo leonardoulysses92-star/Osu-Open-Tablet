@@ -199,6 +199,8 @@ powershell -ExecutionPolicy Bypass -File build_exe.ps1
 - You type your tablet's report rate yourself. Only the primary monitor is detected automatically.
 - Spanish and English interface.
 - **Play Coach**: without a real pen and a real osu! the alignment could not be verified in an actual play; the playfield transform is an approximation (osu!stable, borderless full screen), osu!lazer or windowed play may fail, rotation 90/270 is unverified and the cost constants and thresholds are **uncalibrated** estimates. It reads click keys on Windows only.
+- **Replays (.osr)**: if you pick the replay osu! saves, the coach uses exact data or checks how well what it infers live matches. Only cursor, clicks, mods and hit counts are used from the file (never your name or score). The reader was only tested with **synthetic** files.
+- **Saved profile**: remembers your tablet, screen, answers and last saved settings (`profile.json`, on this PC only; delete it in Settings) and "Continue with my profile" jumps straight to testing.
 - `build_exe.ps1` was not run in this review (Windows only): rebuild the .exe with it before releasing.
 
 ## License

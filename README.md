@@ -199,6 +199,8 @@ powershell -ExecutionPolicy Bypass -File build_exe.ps1
 - La tasa de reporte de tu tableta la escribes tú. Solo se detecta automáticamente el monitor principal.
 - Interfaz en español e inglés.
 - **Coach de partidas**: sin lápiz ni osu! reales no se pudo verificar la alineación en una partida real; el cambio de coordenadas del playfield es aproximado (osu!stable a pantalla completa sin bordes), osu!lazer o en ventana pueden fallar, la rotación 90/270 no está verificada y las constantes del coste y los umbrales son estimaciones **sin calibrar**. Solo lee teclas de clic en Windows.
+- **Repeticiones (.osr)**: si eliges la repetición que osu! guarda, el coach usa datos exactos o comprueba cuánto acierta lo que deduce en vivo. Del archivo solo se usan cursor, clics, modos y aciertos (nunca tu nombre ni tu puntuación). El lector se probó solo con archivos **sintéticos**.
+- **Perfil guardado**: recuerda tu tableta, pantalla, respuestas y tus últimos ajustes guardados (`profile.json`, solo en este PC; se borra en Ajustes) y "Continuar con mi perfil" salta directo a probar.
 - `build_exe.ps1` no se ejecutó en esta revisión (solo funciona en Windows): reconstruye el .exe con él antes de publicar.
 
 ## Licencia

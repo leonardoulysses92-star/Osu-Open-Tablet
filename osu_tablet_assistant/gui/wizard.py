@@ -255,16 +255,25 @@ class WelcomePage(Page):
         self._build_saved_card()
         box = self.card(t("gui.welcome.goal_title"), t("gui.welcome.goal_help"))
         self._goal = tk.StringVar(value=s.goal)
+        self._goal_cards: dict[str, tk.Frame] = {}
         for goal in GOALS:
-            row = frame(box.body)
-            row.pack(fill="x", pady=(px(self, 4), px(self, 8)))
-            top = frame(row)
+            # the whole card is the click target; the radio inside keeps keyboard and screen-reader access
+            row = tk.Frame(box.body, background=COLORS.surface, highlightthickness=2, cursor="hand2",
+                           highlightbackground=COLORS.border, highlightcolor=COLORS.accent)
+            row.pack(fill="x", pady=(0, px(self, 8)))
+            inner = frame(row)
+            inner.pack(fill="x", padx=px(self, 12), pady=px(self, 10))
+            top = frame(inner)
             top.pack(fill="x")
             radio(top, t(f"gui.welcome.goal.{goal}.title"), goal, self._goal, command=self._choose).pack(side="left")
             if goal == "guided":
                 Chip(top, t("gui.welcome.recommended"), "accent").pack(side="left", padx=(px(self, 8), 0))
-            WrapLabel(row, t(f"gui.welcome.goal.{goal}.text"), "Muted").pack(
-                fill="x", padx=(px(self, 24), 0))
+            text = WrapLabel(inner, t(f"gui.welcome.goal.{goal}.text"), "Muted")
+            text.pack(fill="x", padx=(px(self, 24), 0))
+            for widget in (row, inner, top, text):
+                widget.bind("<Button-1>", lambda _e, g=goal: self._pick_goal(g), add="+")
+            self._goal_cards[goal] = row
+        self._paint_goals()
         if s.advanced:       # the long explanation and the community data are Advanced-mode content
             steps = self.card(t("gui.welcome.steps_title"))
             steps.body.columnconfigure(1, weight=1)
@@ -312,8 +321,18 @@ class WelcomePage(Page):
             return
         self.wizard.resume()
 
+    def _pick_goal(self, goal: str) -> None:
+        self._goal.set(goal)
+        self._choose()
+
+    def _paint_goals(self) -> None:
+        """Accent border on the chosen path."""
+        for goal, card in self._goal_cards.items():
+            card.configure(highlightbackground=COLORS.accent if goal == self._goal.get() else COLORS.border)
+
     def _choose(self) -> None:
         self.session.set_goal(self._goal.get())
+        self._paint_goals()
         self.wizard.update_nav()
         self.wizard.refresh_stepper()
 
@@ -854,6 +873,9 @@ class TestingPage(Page):
             self._tree.column(col, width=px(self, width), anchor="w", stretch=col == "label",
                               minwidth=px(self, 40))
         self._tree.pack(fill="both", expand=True)
+        for tag, color in (("excellent", COLORS.good), ("good", COLORS.good), ("weak", COLORS.warn),
+                           ("incomplete", COLORS.subtle)):
+            self._tree.tag_configure(tag, foreground=color)
         self._tree.bind("<<TreeviewSelect>>", lambda _e: self._show_detail())
         self._tie_note = WrapLabel(left.body, "", "Small")
         if s.can_measure:
@@ -944,7 +966,9 @@ class TestingPage(Page):
         self._tree.delete(*self._tree.get_children())
         for cand in s.candidates:
             star = "★ " if cand.id in top else ""
-            self._tree.insert("", "end", iid=cand.id,
+            info = verdict.summaries.get(cand.id) if verdict is not None else None
+            tag = "" if info is None or cand.id not in s.results else (info.grade or "incomplete")
+            self._tree.insert("", "end", iid=cand.id, tags=(tag,) if tag else (),
                               values=(star + candidate_label(s, cand), self._status_of(cand),
                                       self._result_text(cand, verdict)))
         if keep and self._tree.exists(keep[0]):

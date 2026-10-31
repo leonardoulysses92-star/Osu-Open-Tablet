@@ -170,7 +170,8 @@ class App:
             option.pack(side="left", padx=(0, 2))
             Tooltip(option, _LANGUAGE_NAMES[code])
         self._advanced_var = tk.BooleanVar(value=self.session.advanced)
-        self._advanced = ttk.Checkbutton(lang, variable=self._advanced_var, command=self._on_advanced, takefocus=True)
+        self._advanced = ttk.Checkbutton(lang, variable=self._advanced_var, command=self._on_advanced, takefocus=True,
+                                         style="Segment.Toolbutton")
         self._advanced.pack(side="left", padx=(px(header, 14), 0))
         Tooltip(self._advanced, lambda: t("gui.app.advanced_tip"))
         self._settings_button = button(inner, "", lambda: self.wizard.open_settings(), kind="ghost")

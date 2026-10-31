@@ -388,7 +388,7 @@
  "gui.testing.grade.normal": "Normal",
  "gui.testing.grade.weak": "Floja",
  "gui.testing.incomplete_hint": "Faltan pruebas para comparar esta opción con las demás. Pulsa \"Aplicar y probar\" para completarla.",
- "gui.testing.intro": "Estos son ajustes que podrían irte bien. Elige uno y pulsa \"Aplicar y probar\": lo aplicamos en OpenTabletDriver, haces tres pruebas cortas y lo puntuamos. Prueba los que quieras, valora cómo se sienten y pide un refinamiento del mejor cuando quieras.",
+ "gui.testing.intro": "Estos son ajustes que podrían irte bien. Elige uno y pulsa \"Aplicar y probar\": lo aplicamos en OpenTabletDriver, haces tres pruebas cortas y te decimos qué tal le fue. Prueba los que quieras, valora cómo se sienten y pide un refinamiento del mejor cuando quieras.",
  "gui.testing.intro_dry": "Modo de simulación: no se aplica ni se mide nada. Lee las opciones y elige la que quieras exportar.",
  "gui.testing.latency": "Retraso añadido estimado: unos {ms} ms",
  "gui.testing.latency_chip": "+{ms} ms de retraso",

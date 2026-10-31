@@ -388,7 +388,7 @@
  "gui.testing.grade.normal": "Fair",
  "gui.testing.grade.weak": "Weak",
  "gui.testing.incomplete_hint": "Some tests are missing to compare this option with the others. Press \"Apply and test\" to complete it.",
- "gui.testing.intro": "These are settings that could suit you. Pick one and press \"Apply and test\": we apply it to OpenTabletDriver, you do three short tests, and we score it. Try as many as you like, rate how they feel, and ask for a refinement of the best one whenever you want.",
+ "gui.testing.intro": "These are settings that could suit you. Pick one and press \"Apply and test\": we apply it to OpenTabletDriver, you do three short tests, and we tell you how it did. Try as many as you like, rate how they feel, and ask for a refinement of the best one whenever you want.",
  "gui.testing.intro_dry": "Dry-run mode: nothing is applied or measured. Read the options and pick the one you want to export.",
  "gui.testing.latency": "Estimated added delay: about {ms} ms",
  "gui.testing.latency_chip": "+{ms} ms delay",
