@@ -10,7 +10,7 @@ It measures the pen with four short tests, generates several candidate configura
 
 Three ways in: a guided setup, live tuning while you play (companion), and the **play coach**, which watches a real play, tells you in plain words where you fall short (corners, top/bottom, sides) and proposes one change per round until little is left to gain. Your click buttons are configurable (default Z and X; the pen tip does not count unless you choose it).
 
-Early stage (0.1.x). The live-apply path (OTD Console and daemon pipe) is written from OTD's source and has not been verified on real hardware.
+Early stage (0.8.x). The live-apply path (OTD Console and daemon pipe) is written from OTD's source and has not been verified on real hardware.
 
 ## Requirements
 

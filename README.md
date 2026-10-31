@@ -10,7 +10,7 @@ Mide el lápiz con cuatro pruebas cortas, genera varias configuraciones candidat
 
 Tres caminos: **configuración guiada**, **ajuste en vivo** mientras juegas (acompañante) y **coach de partidas**: juegas un mapa de verdad y el coach te dice en palabras sencillas dónde te quedas corto (esquinas, arriba/abajo, laterales) y propone **un** cambio por ronda hasta que ya no queda nada por ganar. Tus botones de clic son configurables (por defecto Z y X; la punta del lápiz no cuenta salvo que la elijas).
 
-Está en una fase temprana (0.1.x). Ver [Estado](#estado).
+Está en una fase temprana (0.8.x). Ver [Estado](#estado).
 
 ## Requisitos
 
