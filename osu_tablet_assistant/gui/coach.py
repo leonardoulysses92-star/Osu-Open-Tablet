@@ -28,6 +28,7 @@ from typing import Any, Callable
 from ..appconfig import app_data_dir
 from ..engine import adapt, optimizer as opt
 from ..engine.playtypes import PlayReport
+from ..keys import KeyChoice, display_list
 from ..models import Reason
 from ..otd.livetune import LiveTuner, controller_sender, dry_run_sender
 from . import hotkeys as hk
@@ -35,6 +36,7 @@ from .coachcore import (ANALYSIS_EVERY_S, PHASES, CoachCore, CoachFeedback, Read
                         ledger_text, say)
 from .companion import companion_args_from_session, make_click_through
 from .i18n import t as default_t
+from .keycard import ClickKeysCard
 from .tabletmap import TabletMap
 from .widgets import (COLORS, Card, Chip, Expander, Notice, WrapLabel, apply_theme, bullets, button, check,
                       dark_title_bar, frame, icon_image, label, px, surface_color)
@@ -87,7 +89,16 @@ class CoachWindow:
                  **core_kwargs: Any) -> None:
         self.t: Translate = translate or default_t
         self.on_keep, self.on_close, self.on_summary = on_keep, on_close, on_summary
+        self.session = session
+        config = getattr(session, "app_config", None)
+        if core is None and config is not None:
+            core_kwargs.setdefault("keys", config.effective_click_keys)
+            core_kwargs.setdefault("analysis_detail", config.analysis_detail)
         self.core = core if core is not None else self._core_from_session(session, settings, **core_kwargs)
+        self.key_choice = config.key_choice if config is not None else KeyChoice.make(self.core.keys)
+        self.core.set_keys(self.key_choice.effective)
+        self.keys_card: ClickKeysCard | None = None
+        self._keys_state: dict = {"open": False}       # the key card stays open across screen refreshes
         self.beeper = beeper if beeper is not None else hk.Beeper()
         self._actions: queue.Queue[str] = queue.Queue()
         self.hotkeys = hk.HotkeyManager({"coach_toggle": COACH_HOTKEY}, self._actions.put,
@@ -146,7 +157,7 @@ class CoachWindow:
             self.body.destroy()
         self.body = ttk.Frame(self.root, padding=px(self.root, 16))
         self.body.pack(fill="both", expand=True)
-        self.map = None
+        self.map, self.keys_card, self._hint_button = None, None, None
         compact = phase == "observe"
         self._set_window_mode(compact)
         {"prepare": self._build_prepare, "observe": self._build_observe, "report": self._build_report}[phase]()
@@ -165,8 +176,8 @@ class CoachWindow:
             if self._geometry_before_observe is not None:
                 root.geometry(self._geometry_before_observe)
                 self._geometry_before_observe = None
-            elif not root.winfo_viewable():
-                root.geometry(f"{px(root, 640)}x{px(root, 680)}")
+            elif not root.winfo_viewable():   # tall enough for the click-button card, never taller than the screen
+                root.geometry(f"{px(root, 640)}x{min(px(root, 760), root.winfo_screenheight() - px(root, 80))}")
 
     def _say(self, reason: Reason) -> str:
         return say(reason, self.t)
@@ -202,10 +213,14 @@ class CoachWindow:
             button(row, self.t("play.prepare.pick_map"), self._pick_map, kind="ghost").pack(side="left")
         for issue in ready.issues:
             WrapLabel(card.body, "• " + self._say(issue), "Small").pack(fill="x")
+        self.keys_card = ClickKeysCard(self.body, self.key_choice, self.t, self._keys_changed, core.analysis_detail,
+                                       self._detail_changed, self._keys_state)
+        self.keys_card.pack(fill="x", pady=(0, px(self.root, 8)))
         self.map = TabletMap(self.body, height=190)
         self.map.pack(fill="x", pady=(0, px(self.root, 8)))
         self.map.set_setup(core.tablet, core.area, core.display)
-        WrapLabel(self.body, self.t("play.prepare.honest"), "Small").pack(fill="x", pady=(0, px(self.root, 10)))
+        WrapLabel(self.body, self.t("play.prepare.honest", keys=display_list(core.keys)), "Small").pack(
+            fill="x", pady=(0, px(self.root, 10)))
         if core.result is None and core.state.rounds:
             WrapLabel(self.body, self._progress_text(), "Muted").pack(fill="x", pady=(0, px(self.root, 6)))
         actions = frame(self.body)
@@ -230,6 +245,38 @@ class CoachWindow:
         if core.state.rounds:
             self._build_progress_strip(self.body)
             self._build_keep_row(self.body)
+
+    def _keys_changed(self, choice: KeyChoice) -> None:
+        """The player changed their click buttons: use them, save them, refresh the screen when not listening."""
+        self.key_choice = choice
+        self.core.set_keys(choice.effective)
+        self._save_config(lambda cfg: cfg.set_key_choice(choice))
+        if self.keys_card is None or not self.keys_card.listening:
+            self.show_phase("prepare")
+
+    def _detail_changed(self, detail: str) -> None:
+        self.core.set_analysis_detail(detail)
+        self._save_config(lambda cfg: setattr(cfg, "analysis_detail", detail))
+
+    def _save_config(self, change: Callable[[Any], None]) -> None:
+        """Change the assistant's config and save it at once; a failure never breaks the coach."""
+        config = getattr(self.session, "app_config", None)
+        if config is None:
+            return
+        try:
+            change(config)
+            self.session.save_app_config()
+        except Exception:            # saving is a convenience: the choice still applies to this session
+            pass
+
+    def choose_keys(self) -> None:
+        """From a "no click seen" hint: back to prepare (dropping what was recorded) and listen for the buttons."""
+        if self.core.phase == "observe":
+            self.core.abort()
+        self.core.result = None
+        self.show_phase("prepare")
+        if self.keys_card is not None:
+            self.keys_card.start_listening()
 
     def _check_row(self, parent: tk.Misc, ok: bool, text: str) -> None:
         row = frame(parent)
@@ -295,6 +342,10 @@ class CoachWindow:
         card = Card(self.body, self.t("play.report.found_title"))
         card.pack(fill="x", pady=(0, px(self.root, 8)))
         bullets(card.body, [self._say(r) for r in result.findings[:4]]).pack(fill="x")
+        if result.hint is not None:
+            WrapLabel(card.body, self._say(result.hint), "Strong").pack(fill="x", pady=(px(self.root, 6), 0))
+            button(card.body, self.t("play.keys.open"), self.choose_keys, kind="secondary").pack(
+                anchor="w", pady=(px(self.root, 4), 0))
         if proposal.kind != "none":
             card = Card(self.body, self.t("play.report.change_title"), accent=COLORS.accent)
             card.pack(fill="x", pady=(0, px(self.root, 8)))
@@ -502,6 +553,12 @@ class CoachWindow:
         if view is not None:
             text = self.t("play.observe.searching") if core.searching() else self.t(
                 "play.observe.running", clicks=view.clicks)
+            hint = core.no_clicks_hint(view)
+            if hint is not None:
+                text = self._say(hint)
+                if self._hint_button is None:
+                    self._hint_button = button(self.body, self.t("play.keys.open"), self.choose_keys, kind="ghost")
+                    self._hint_button.pack(anchor="w", pady=(px(self.root, 4), 0))
             self._observe_var.set(text)
         now = time.monotonic()
         if not self._analyzing and now - self._last_analysis >= self._interval:

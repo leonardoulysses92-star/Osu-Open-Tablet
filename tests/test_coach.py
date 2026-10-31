@@ -318,12 +318,102 @@ class DataLedgerTests(unittest.TestCase):
             text = coach.ledger_text()
             self.assertEqual(text.count("•"), len(coach.DATA_LEDGER))
             self.assertNotIn("play.data", text)
-            self.assertIn("z, x, mouse1, mouse2", text)
+            self.assertIn("Z, X", text)
+            self.assertNotIn("Mouse 1", text)
+            self.assertIn("A, Mouse 4, Mouse 1", coach.ledger_text(keys=("a", "mouse4", "mouse1")))
 
     def test_the_ledger_matches_what_the_code_really_reads(self) -> None:
-        # the recorder only knows the configured keys, the replay keeps no identity, the profile no play data
-        self.assertEqual(playwatch.DEFAULT_CLICK_KEYS, ("z", "x", "mouse1", "mouse2"))
+        # the recorder only knows the configured keys (default Z and X: the pen tip is not a click unless the
+        # player says so), the replay keeps no identity, the profile no play data
+        self.assertEqual(playwatch.DEFAULT_CLICK_KEYS, ("z", "x"))
         self.assertEqual(set(coach.DATA_LEDGER), {"cursor", "keys", "window", "map", "replay", "profile", "never"})
+
+
+class ClickKeyTests(unittest.TestCase):
+    def test_set_keys_changes_what_the_next_recorder_reads(self) -> None:
+        env = Env(self)
+        core = coach.CoachCore(env.tuner, CTL472, DISPLAY, watcher=env.core.watcher, title_source=lambda: TITLE,
+                               cache_path=env.dir / "idx2.json")
+        self.assertEqual(core.keys, ("z", "x"))
+        self.assertTrue(core.set_keys(("A", "mouse4", "bogus")))
+        self.assertEqual(core.keys, ("a", "mouse4"))
+        rec = core._default_recorder(USER_AREA)
+        self.assertEqual(rec.keys, ("a", "mouse4"))
+        core.phase = "observe"
+        self.assertFalse(core.set_keys(("z",)))                       # never in the middle of a recording
+        self.assertEqual(core.keys, ("a", "mouse4"))
+
+    def test_readiness_names_missing_keys_and_explains_the_pen_tip(self) -> None:
+        env = Env(self)
+        self.assertNotIn("play.prep.pen_tip", [i.key for i in env.core.readiness().issues])
+        env.core.set_keys(())
+        ready = env.core.readiness()
+        self.assertIn("play.prep.no_keys", [i.key for i in ready.issues])
+        self.assertFalse(ready.can_start)
+        self.assertFalse(env.core.start())
+        env.core.set_keys(("z", "mouse1"))
+        ready = env.core.readiness()
+        self.assertIn("play.prep.pen_tip", [i.key for i in ready.issues])
+        self.assertTrue(ready.can_start)
+        self.assertEqual(ready.keys, ("z", "mouse1"))
+
+    def test_no_click_hint_when_the_pen_moves_but_no_chosen_key_is_pressed(self) -> None:
+        env = Env(self)
+        far = DISPLAY.height_px * (coach.NO_CLICKS_TRAVEL_SCREENS + 1)
+        moving = playwatch.LiveView((1.0, 1.0), (), 0, None, 10.0, far, coach.NO_CLICKS_HINT_S + 1)
+        hint = env.core.no_clicks_hint(moving)
+        self.assertEqual(hint.key, "play.keys.none_seen")
+        self.assertEqual(hint.params["keys"], "Z, X")
+        from osu_tablet_assistant.gui import i18n
+        self.addCleanup(i18n.set_language, "es")
+        i18n.set_language("es")
+        self.assertEqual(coach.say(hint), "No he visto ningún clic con Z, X: ¿usas otros botones?")
+        self.assertIsNone(env.core.no_clicks_hint(replace(moving, clicks=3)))           # clicks seen
+        self.assertIsNone(env.core.no_clicks_hint(replace(moving, travel_px=10.0)))     # pen resting
+        self.assertIsNone(env.core.no_clicks_hint(replace(moving, elapsed_s=2.0)))      # too early to say
+
+    def test_a_round_without_clicks_carries_the_hint(self) -> None:
+        env = Env(self)
+        env.core.readiness()
+
+        def silent(area):
+            rec = FakeRecorder(area, 1)
+            rec.capture = replace(rec.capture, clicks=())
+            return rec
+
+        env.core._recorder_factory = silent        # type: ignore[assignment]
+        env.core.start()
+        result = env.core.finish()
+        self.assertEqual(result.hint.key, "play.keys.none_seen")
+        self.assertEqual(result.proposal.kind, "none")
+        self.assertIsNone(Env(self).play_round().hint)                 # a normal round has no hint
+
+    def test_abort_drops_the_recording_without_a_round(self) -> None:
+        env = Env(self)
+        env.core.readiness()
+        env.core.start()
+        env.core.abort()
+        self.assertEqual((env.core.phase, env.core.state.rounds, env.core.recorder), ("prepare", (), None))
+
+    def test_analysis_detail_sets_the_grid_of_the_report(self) -> None:
+        env = Env(self)
+        self.assertEqual(env.play_round().report.grid, (6, 8))
+        env.core.set_analysis_detail("normal")
+        env.core.result = None
+        report = env.play_round().report
+        self.assertEqual((report.grid, len(report.cells)), ((3, 4), 12))
+        env.core.set_analysis_detail("very_fine")
+        self.assertEqual(len(env.play_round().report.cells), 108)
+
+    def test_recorder_measures_how_far_the_cursor_moved(self) -> None:
+        sampler = PenSampler(position_source=lambda: None, clock=lambda: 0.0)
+        for i in range(5):
+            sampler.record(float(i * 3), float(i * 4), t=i * 0.1)
+        rec = playwatch.PlayRecorder(sampler, DISPLAY, USER_AREA, key_source=lambda: {}, clock=lambda: 1.0)
+        rec.running = True
+        view = rec.live()
+        self.assertAlmostEqual(view.travel_px, 20.0)
+        self.assertEqual(view.clicks, 0)
 
 
 class PlayRecorderTests(unittest.TestCase):

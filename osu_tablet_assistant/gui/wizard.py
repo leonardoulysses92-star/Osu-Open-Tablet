@@ -1679,7 +1679,7 @@ class SettingsDialog(tk.Toplevel):
             self._profile_button.configure(state="disabled")
         ledger = Card(body, t("gui.settings.ledger_title"), t("gui.settings.ledger_help"))
         ledger.pack(fill="x", pady=(0, px(self, 12)))
-        WrapLabel(ledger.body, ledger_text(t), "Small").pack(fill="x")
+        WrapLabel(ledger.body, ledger_text(t, cfg.effective_click_keys), "Small").pack(fill="x")
         self.data = DataCard(body, wizard, settings_button=False)
         self.data.pack(fill="x", pady=(0, px(self, 12)))
         self.message = Notice(body)

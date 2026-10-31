@@ -14,11 +14,14 @@ import platform
 import re
 import shutil
 import tempfile
-from dataclasses import asdict, dataclass, fields
+from dataclasses import asdict, dataclass, field, fields
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Mapping
 from urllib.parse import urlparse
+
+from .engine.playtypes import ANALYSIS_DETAILS, DEFAULT_DETAIL
+from .keys import DEFAULT_CLICK_KEYS, KeyChoice
 
 APP_DIR_NAME = "OsuOpenTablet"
 CONFIG_FILE = "config.json"
@@ -59,6 +62,23 @@ class AppConfig:
     update_url: str = DEFAULT_UPDATE_URL
     last_update_check: str | None = None       # ISO timestamp of the last successful check
     version: int = 1
+    # Play Coach. Click keys: see ``keys.KeyChoice`` (keyboard keys / extra buttons, never "mouse1");
+    # pen_clicks adds the pen tip (mouse 1) to the keys that are read. Old files without these fields load fine.
+    click_keys: list[str] = field(default_factory=lambda: list(DEFAULT_CLICK_KEYS))
+    pen_clicks: bool = False
+    analysis_detail: str = DEFAULT_DETAIL      # normal (3x4) | fine (6x8) | very_fine (9x12)
+
+    @property
+    def key_choice(self) -> KeyChoice:
+        return KeyChoice.make(self.click_keys, self.pen_clicks)
+
+    @property
+    def effective_click_keys(self) -> tuple[str, ...]:
+        """The keys the Play Coach reads (the pen tip only when ``pen_clicks``)."""
+        return self.key_choice.effective
+
+    def set_key_choice(self, choice: KeyChoice) -> None:
+        self.click_keys, self.pen_clicks = list(choice.keys), choice.pen_clicks
 
 
 def _valid_url(value: Any) -> bool:
@@ -83,10 +103,14 @@ def from_dict(data: Any) -> AppConfig:
         "update_url": _valid_url,
         "last_update_check": lambda v: v is None or (isinstance(v, str) and len(v) <= 40),
         "version": lambda v: isinstance(v, int) and not isinstance(v, bool),
+        "click_keys": lambda v: isinstance(v, list) and len(v) <= 50 and all(isinstance(k, str) for k in v),
+        "pen_clicks": lambda v: isinstance(v, bool),
+        "analysis_detail": lambda v: v in ANALYSIS_DETAILS,
     }
     for f in fields(AppConfig):
         if f.name in data and checks[f.name](data[f.name]):
             setattr(cfg, f.name, data[f.name])
+    cfg.set_key_choice(cfg.key_choice)     # known names only, no duplicates, never zero ways to click
     return cfg
 
 

@@ -104,9 +104,13 @@ class JudgingTests(unittest.TestCase):
         self.assertEqual(by_zone["bottom"].kind, SHORT)
 
     def test_corner_cells_are_filled(self) -> None:
+        # the default grid is now the finer 6 x 8 ("Fine"); 3 x 4 is still available ("Normal")
         _c, report = analyze(Player(), seed=1)
-        self.assertEqual(len(report.cells), 12)
+        self.assertEqual((report.grid, len(report.cells)), ((6, 8), 48))
         self.assertEqual(sum(c.n for c in report.cells), report.n_judged)
+        coarse = po.analyze_play(MAP, simulate(MAP, Player(), seed=1), rows=3, cols=4)
+        self.assertEqual(len(coarse.cells), 12)
+        self.assertEqual(sum(c.n for c in coarse.cells), coarse.n_judged)
 
     def test_lag_shows_as_negative_along_error_on_fast_jumps(self) -> None:
         fast = make_map(seed=5, n=160, gap_ms=95.0)
