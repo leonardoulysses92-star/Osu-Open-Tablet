@@ -70,7 +70,7 @@
  "play.prep.osu_closed": "Abre osu! y carga un mapa.",
  "play.prepare.check_title": "Antes de empezar",
  "play.prepare.honest": "Qué ve el coach: dónde está tu cursor y SOLO las teclas de clic (Z, X y los botones del ratón). No lee la memoria de osu!: los aciertos y fallos se deducen comparando tus clics con el mapa. Si quieres datos exactos, elige tú la repetición (.osr) que osu! guarda: de ella solo se usan las posiciones del cursor, los clics, los modos y los aciertos (nunca tu nombre ni tu puntuación). Nada sale de tu PC.",
- "play.prepare.hotkey": "Atajo en cualquier momento: {key}",
+ "play.prepare.hotkey": "Atajo en cualquier momento: {combo}",
  "play.prepare.intro": "Juega un mapa con osu! abierto y el coach te dirá, en palabras sencillas, dónde fallas y qué cambiar en tu tableta. Se repite hasta que ya no quede nada por ganar.",
  "play.prepare.map_missing": "Aún no sé qué mapa vas a jugar",
  "play.prepare.map_unreadable": "No se pudo leer ese archivo .osu.",

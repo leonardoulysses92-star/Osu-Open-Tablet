@@ -70,7 +70,7 @@
  "play.prep.osu_closed": "Open osu! and load a map.",
  "play.prepare.check_title": "Before you start",
  "play.prepare.honest": "What the coach sees: where your cursor is and ONLY the click keys (Z, X and the mouse buttons). It does not read osu!'s memory: hits and misses are worked out by comparing your clicks with the map. For exact data, pick the replay (.osr) that osu! saves yourself: only cursor positions, clicks, mods and hit counts are used from it (never your name or score). Nothing leaves your PC.",
- "play.prepare.hotkey": "Shortcut at any time: {key}",
+ "play.prepare.hotkey": "Shortcut at any time: {combo}",
  "play.prepare.intro": "Play a map with osu! open and the coach will tell you, in plain words, where you miss and what to change on your tablet. It repeats until there is nothing left to gain.",
  "play.prepare.map_missing": "I don't know which map you'll play yet",
  "play.prepare.map_unreadable": "That .osu file could not be read.",

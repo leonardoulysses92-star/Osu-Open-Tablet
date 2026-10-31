@@ -214,7 +214,7 @@ class CoachWindow:
         button(actions, self.t("play.prepare.use_replay"), lambda: self.pick_replay("round"), kind="ghost").pack(
             side="left", padx=(px(self.root, 8), 0))
         if self.hotkeys.available:
-            label(actions, self.t("play.prepare.hotkey", key=COACH_HOTKEY.replace("+", " + ").title()), "Small").pack(
+            label(actions, self.t("play.prepare.hotkey", combo=COACH_HOTKEY.replace("+", " + ").title()), "Small").pack(
                 side="left", padx=(px(self.root, 12), 0))
         self._mini_var = tk.BooleanVar(value=self.mini is not None)
         adv = Expander(self.body, self.t("play.prepare.options"), height=9)
