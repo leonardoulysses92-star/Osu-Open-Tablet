@@ -181,6 +181,46 @@ class RoundResult:
 
 
 @dataclass(frozen=True)
+class RoundLine:
+    """One played round as the progress list shows it."""
+    number: int                  # 1-based
+    mark: str                    # start | better | same | worse | unclear (unclear = no usable data)
+    kind: str                    # what was changed before it: start | shift | scale | probe | filter | manual | ...
+    change: Reason | None        # the first reason of that change, in words
+    best: bool = False
+    latest: bool = False
+
+
+@dataclass(frozen=True)
+class RoundsSummary:
+    """The few rounds worth showing at a glance, a counter, and the full list for a drop-down."""
+    lines: tuple[RoundLine, ...]         # every round, oldest first
+    highlights: tuple[RoundLine, ...]    # at most three with data: the first, the best one and the latest
+    streak: int                          # latest rounds in a row with data that did not improve
+    nodata: int                          # rounds without usable data (hidden from the highlights)
+
+
+def rounds_text(summary: RoundsSummary, translate: Translate = default_t) -> str:
+    """Plain-language list of every round: what was tried and what came out of it."""
+    out = []
+    for line in summary.lines:
+        tags = ""
+        if line.best and line.mark != "start":
+            tags += " · " + translate("play.rounds.best")
+        if line.latest:
+            tags += " · " + translate("play.rounds.latest")
+        head = translate("play.rounds.line", n=line.number, mark=translate(f"play.mark.{line.mark}"), tags=tags)
+        what = say(line.change, translate) if line.change is not None else translate(
+            f"play.rounds.kind.{line.kind}" if line.kind in ROUND_KINDS else "play.rounds.kind.other")
+        out.append(f"{head}\n    {what}" if line.mark != "unclear" else
+                   f"{head}\n    {translate('play.rounds.nodata')}")
+    return "\n".join(out)
+
+
+ROUND_KINDS = ("start", "shift", "scale", "probe", "filter", "manual", "smoothing", "revert")
+
+
+@dataclass(frozen=True)
 class ReplayOutcome:
     """Result of reading a replay the player picked."""
     ok: bool
@@ -565,6 +605,26 @@ class CoachCore:
                 out.append("better" if gain > limit else "worse" if gain < -limit else "same")
             previous = rec
         return tuple(out)
+
+    def rounds_summary(self) -> RoundsSummary:
+        """The rounds in a compact form: first, best and latest round with data, a no-gain streak, the rest apart."""
+        marks, rounds, best = self.marks(), self.state.rounds, self.state.best
+        lines = tuple(RoundLine(i + 1, marks[i], rec.kind, rec.change[0] if rec.change else None,
+                                best == i, i == len(rounds) - 1) for i, rec in enumerate(rounds))
+        with_data = [line for line in lines if line.mark != "unclear"]
+        chosen: dict[int, RoundLine] = {}
+        if with_data:
+            best_line = next((line for line in with_data if line.best), None)
+            for line in (with_data[0], best_line, with_data[-1]):
+                if line is not None:
+                    chosen[line.number] = line
+        streak = 0
+        for line in reversed(with_data):
+            if line.mark not in ("same", "worse"):
+                break
+            streak += 1
+        return RoundsSummary(lines, tuple(sorted(chosen.values(), key=lambda line: line.number)), streak,
+                             len(lines) - len(with_data))
 
     # --------------------------------------------------------------- changes
     def apply_proposal(self) -> CoachFeedback:

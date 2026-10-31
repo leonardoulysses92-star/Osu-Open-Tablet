@@ -33,7 +33,7 @@ from ..models import Reason
 from ..otd.livetune import LiveTuner, controller_sender, dry_run_sender
 from . import hotkeys as hk
 from .coachcore import (ANALYSIS_EVERY_S, FREE_ONLY, MANUAL_MOVES, PHASES, CoachCore, CoachFeedback, Readiness,
-                        RoundResult, Translate, area_changes, area_summary, ledger_text, say)
+                        RoundResult, Translate, area_changes, area_summary, ledger_text, rounds_text, say)
 from .companion import companion_args_from_session, make_click_through
 from .i18n import t as default_t
 from .keycard import ClickKeysCard
@@ -602,15 +602,28 @@ class CoachWindow:
             self.status.show(self._say(outcome.problem), "warn")
 
     def _build_progress_strip(self, parent: tk.Misc) -> None:
-        marks = self.core.marks()
-        if not marks:
+        """Progress at a glance: first, best and latest round with data, a no-gain counter, the rest in a drop-down."""
+        summary = self.core.rounds_summary()
+        if not summary.lines:
             return
         row = frame(parent)
-        row.pack(fill="x", pady=(px(self.root, 2), px(self.root, 6)))
+        row.pack(fill="x", pady=(px(self.root, 2), px(self.root, 4)))
         label(row, self.t("play.progress.title"), "Small").pack(side="left", padx=(0, px(self.root, 8)))
         kinds = {"start": "neutral", "better": "success", "same": "neutral", "worse": "warn", "unclear": "neutral"}
-        for i, mark in enumerate(marks):
-            Chip(row, f"{i + 1} · {self.t(f'play.mark.{mark}')}", kinds[mark]).pack(side="left", padx=(0, 4))
+        for line in summary.highlights:
+            text = f"{line.number} · {self.t(f'play.mark.{line.mark}')}"
+            if line.best and line.mark != "start":
+                text += " · " + self.t("play.rounds.best")
+            elif line.latest:
+                text += " · " + self.t("play.rounds.latest")
+            Chip(row, text, kinds[line.mark]).pack(side="left", padx=(0, 4))
+        if summary.streak >= 2:
+            WrapLabel(parent, self.t("play.rounds.streak", n=summary.streak), "Small").pack(fill="x")
+        if len(summary.lines) > len(summary.highlights):
+            more = Expander(parent, self.t("play.rounds.all", n=len(summary.lines)),
+                            height=min(max(len(summary.lines) * 2, 4), 10))
+            more.pack(fill="x", pady=(0, px(self.root, 6)))
+            more.set(rounds_text(summary, self.t))
 
     def _build_keep_row(self, parent: tk.Misc, only_restore: bool = False) -> None:
         row = frame(parent)

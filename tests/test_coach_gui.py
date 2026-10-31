@@ -236,6 +236,21 @@ class ClickKeysCardTests(unittest.TestCase):
         self.assertEqual(win.core.beatmap.version, "Hard")
         self.assertIn(i18n.t("play.map.changed", name="Artist - Song [Hard]"), win._observe_var.get())
 
+    def test_progress_shows_three_rounds_a_counter_and_a_dropdown(self) -> None:
+        from dataclasses import replace
+        from osu_tablet_assistant.engine.playtypes import RoundRecord
+        area = self.env.core.area
+        costs = [10.0, 8.0, 8.0, 12.0, None, 12.0]
+        rounds = tuple(RoundRecord(i, c, None, 60 if c is not None else 2, area, (), (), c is not None, 0.0,
+                                   "start" if i == 0 else "probe") for i, c in enumerate(costs))
+        self.env.core.state = replace(self.env.core.state, rounds=rounds, best=1)
+        win = self.window(FakeSession())
+        shown = self.texts(win.root)
+        self.assertIn(i18n.t("play.rounds.streak", n=3), shown)            # the no-gain streak is a counter
+        self.assertIn(i18n.t("play.rounds.all", n=6), shown)               # the full list hides in a drop-down
+        self.assertIn("2 · mejor · la mejor", shown)                        # first, best and latest are chips
+        self.assertNotIn("5 · sin datos", shown)                            # a round without data is not a chip
+
     def test_free_proportion_switch_reaches_the_core_and_is_saved(self) -> None:
         session = FakeSession()
         win = self.window(session)

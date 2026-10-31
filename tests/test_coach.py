@@ -104,6 +104,50 @@ class Env:
         return result
 
 
+class RoundsSummaryTests(unittest.TestCase):
+    """The progress list: three highlights, a no-gain counter and the full list kept for a drop-down."""
+
+    def setUp(self) -> None:
+        from osu_tablet_assistant.gui import i18n
+        self.addCleanup(i18n.set_language, "es")
+        i18n.set_language("es")
+
+    def core_with(self, costs: list, best: int | None, kinds: dict | None = None) -> "coach.CoachCore":
+        from dataclasses import replace as _replace
+        from osu_tablet_assistant.engine.playtypes import RoundRecord
+        from osu_tablet_assistant.models import Reason
+        env = Env(self)
+        area = env.core.area
+        kinds = kinds or {}
+        rounds = tuple(RoundRecord(i, c, None, 60 if c is not None else 2, area, (),
+                                   (Reason("play.msg.applied"),) if i in kinds else (), c is not None, 0.0,
+                                   kinds.get(i, "start" if i == 0 else "probe"))
+                       for i, c in enumerate(costs))
+        env.core.state = _replace(env.core.state, rounds=rounds, best=best)
+        return env.core
+
+    def test_highlights_counter_and_hidden_rounds(self) -> None:
+        core = self.core_with([10.0, 8.0, 8.0, 12.0, None, 12.0], best=1)
+        s = core.rounds_summary()
+        self.assertEqual([l.mark for l in s.lines], ["start", "better", "same", "worse", "unclear", "same"])
+        self.assertEqual([l.number for l in s.highlights], [1, 2, 6])         # first, best, latest with data
+        self.assertEqual(s.streak, 3)                                         # same, worse, same since the best
+        self.assertEqual(s.nodata, 1)
+        text = coach.rounds_text(s)
+        self.assertIn("Ronda 2: mejor · la mejor", text)
+        self.assertIn("Ronda 6: igual · la última", text)
+        self.assertIn("no cuenta", text)                                      # the round without data says why
+
+    def test_few_rounds_and_none(self) -> None:
+        self.assertEqual(self.core_with([], best=None).rounds_summary().lines, ())
+        s = self.core_with([10.0], best=0).rounds_summary()
+        self.assertEqual([l.number for l in s.highlights], [1])
+        self.assertEqual(s.streak, 0)
+        none = self.core_with([None, None], best=None).rounds_summary()
+        self.assertEqual(none.highlights, ())                                 # nothing usable: nothing highlighted
+        self.assertEqual(none.nodata, 2)
+
+
 class ReadinessTests(unittest.TestCase):
     def test_everything_ready(self) -> None:
         ready = Env(self).core.readiness()
