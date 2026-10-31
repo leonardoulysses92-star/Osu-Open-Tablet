@@ -4,6 +4,9 @@ La versión actual es la que está en `main`. Cada versión anterior queda **sep
 (`v0.1.0`, `v0.2.0`...): `git checkout v0.5.0` muestra el proyecto tal como estaba entonces, y
 `git tag` las lista todas. El `main` no guarda copias de versiones viejas ni ejecutables.
 
+Los números siguen el tamaño del cambio: pequeño → `0.8.0.1` (se muestra "8.0.1"), medio → `0.8.1` ("8.1"),
+grande → `0.9.0` ("9"). Detalle en [CONTRIBUTING.md](CONTRIBUTING.md#publicar-una-versión).
+
 Cómo se publica una versión nueva (el script archiva la anterior y actualiza el proyecto): ver
 [CONTRIBUTING.md](CONTRIBUTING.md#publicar-una-versión).
 

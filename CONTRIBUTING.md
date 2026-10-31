@@ -38,8 +38,18 @@ los tests fallan si no están al día.
 Para publicar la siguiente, con el árbol limpio:
 
 ```
-powershell -ExecutionPolicy Bypass -File tools\release.ps1 -Version 0.9.0 -Notes "Qué cambia, en una frase"
+powershell -ExecutionPolicy Bypass -File tools\release.ps1 -Change small -Notes "Qué cambia, en una frase"
 ```
+
+El número de versión sigue el tamaño del cambio (se escribe `0.G.M.S` y se muestra sin el 0 inicial):
+
+| Cambio | Qué sube | Ejemplo | Se muestra |
+|---|---|---|---|
+| Pequeño: arreglos y ajustes menores (`-Change small`) | el último número | 0.8.0 → 0.8.0.1 | 8.0.1 |
+| Medio: una función o mejora notable (`-Change medium`) | el tercer número | 0.8.0.1 → 0.8.1 | 8.1 |
+| Grande: un cambio importante (`-Change large`) | el segundo número | 0.8.1 → 0.9.0 | 9 |
+
+La versión 1.0 es la primera que se publicará como Release. Con `-Version X.Y.Z` se puede fijar el número a mano.
 
 El script comprueba los tests, sube el número de versión, añade la entrada al `CHANGELOG.md`, hace el commit y
 la etiqueta `v0.9.0`, compila el `.exe` y mueve el ejecutable anterior de la carpeta del Escritorio a

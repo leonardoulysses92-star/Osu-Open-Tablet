@@ -1,7 +1,13 @@
 <#
 Publishes a new version and keeps the previous one apart.
 
-  powershell -ExecutionPolicy Bypass -File tools\release.ps1 -Version 0.9.0 -Notes "What changes, in one sentence"
+  powershell -ExecutionPolicy Bypass -File tools\release.ps1 -Change small|medium|large -Notes "What changes, in one sentence"
+
+The version number follows the size of the change (written 0.G.M.S, shown without the leading 0, e.g. 0.8.0.1 is "8.0.1"):
+  small  -> the last number goes up      0.8.0   -> 0.8.0.1   ("8.0.1")  fixes and tiny tweaks
+  medium -> the third number goes up     0.8.0.1 -> 0.8.1     ("8.1")    a feature or a noticeable improvement
+  large  -> the second number goes up    0.8.1   -> 0.9.0     ("9")      a big change
+-Version X.Y.Z[.W] sets the number by hand instead of -Change.
 
 What it does, in order (nothing is pushed):
   1. checks the working tree is clean, the version is new and the tests pass;
@@ -13,7 +19,8 @@ What it does, in order (nothing is pushed):
 At the end it prints the git push command. -DryRun only shows what would be done.
 #>
 param(
-    [Parameter(Mandatory = $true)][string]$Version,
+    [string]$Version,
+    [ValidateSet('small', 'medium', 'large')][string]$Change,
     [Parameter(Mandatory = $true)][string]$Notes,
     [string]$Dest = (Join-Path ([Environment]::GetFolderPath('Desktop')) 'Osu Open Tablet'),
     [switch]$DryRun
@@ -30,7 +37,20 @@ function Edit-File([string]$Path, [scriptblock]$Change) {
     [IO.File]::WriteAllText($Path, (& $Change $text), (New-Object Text.UTF8Encoding $false))
 }
 
-if ($Version -notmatch '^(\d+)\.(\d+)\.(\d+)$') { throw "Version must look like 0.9.0, not '$Version'." }
+$versionPattern = '^(\d+)\.(\d+)\.(\d+)(?:\.(\d+))?$'
+if ($Version -and $Change) { throw 'Use -Version or -Change, not both.' }
+if (-not $Version) {
+    if (-not $Change) { throw 'Say how big the change is (-Change small|medium|large) or give -Version.' }
+    $current = ([IO.File]::ReadAllText((Join-Path $root 'osu_tablet_assistant/__init__.py')) -replace '(?s).*__version__ = "([^"]+)".*', '$1')
+    if ($current -notmatch $versionPattern) { throw "Cannot read the current version ('$current')." }
+    $g = [int]$Matches[2]; $m = [int]$Matches[3]; $s = if ($Matches[4]) { [int]$Matches[4] } else { 0 }
+    $Version = switch ($Change) {
+        'large'  { "0.$($g + 1).0" }
+        'medium' { "0.$g.$($m + 1)" }
+        'small'  { "0.$g.$m.$($s + 1)" }
+    }
+}
+if ($Version -notmatch $versionPattern) { throw "Version must look like 0.9.0 or 0.8.0.1, not '$Version'." }
 $phase = "$($Matches[1]).$($Matches[2]).x"
 $tag = "v$Version"
 if (& $git tag --list $tag) { throw "The tag $tag already exists." }
