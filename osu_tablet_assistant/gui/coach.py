@@ -92,6 +92,7 @@ class CoachWindow:
         self._results: queue.Queue[PlayReport | None] = queue.Queue()
         self._analyzing = False
         self._last_analysis = 0.0
+        self._interval = ANALYSIS_EVERY_S      # grows when one analysis is slow (it competes with the cursor sampler)
         self._closed = False
         self._job: str | None = None
         self.mini: MiniMap | None = None
@@ -450,17 +451,20 @@ class CoachWindow:
                 "play.observe.running", clicks=view.clicks)
             self._observe_var.set(text)
         now = time.monotonic()
-        if not self._analyzing and now - self._last_analysis >= ANALYSIS_EVERY_S:
+        if not self._analyzing and now - self._last_analysis >= self._interval:
             self._analyzing, self._last_analysis = True, now
             threading.Thread(target=self._analysis_worker, name="CoachAnalysis", daemon=True).start()
         if core.should_auto_stop():
             self.stop_observing()
 
     def _analysis_worker(self) -> None:
+        started = time.monotonic()
         try:
             report = self.core.analyze_live()
         except Exception:
             report = None
+        # leave at least ~9 analysis-durations of idle time so the cursor sampler thread keeps its CPU
+        self._interval = max(ANALYSIS_EVERY_S, 10 * (time.monotonic() - started))
         self._results.put(report)
 
     # ----------------------------------------------------------------- closing

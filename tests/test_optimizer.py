@@ -10,7 +10,7 @@ from osu_tablet_assistant.engine import playobserve as po
 from osu_tablet_assistant.engine.playtypes import (IMPROVING, INSUFFICIENT, PLATEAU, START, WORSE, FeelFit,
                                                     PlayReport, ReachFit, RoundRecord)
 from osu_tablet_assistant.models import FilterConfig, Priority, ProfileInfo, Rect, UserPreferences
-from playsim import AREA, TABLET, Player, make_map, simulate
+from playsim import AREA, TABLET, make_map, player_for, simulate
 
 MAP = make_map(seed=11, n=90, gap_ms=320.0)
 IDEAL = Rect(64.0, 37.0, 78.0, 49.0, 180.0)      # the area this simulated hand "wants"
@@ -18,15 +18,6 @@ IDEAL = Rect(64.0, 37.0, 78.0, 49.0, 180.0)      # the area this simulated hand 
 
 def profile(area: Rect = AREA, filters: tuple = ()) -> ProfileInfo:
     return ProfileInfo("CTL-472", "Output", Rect(1920, 1080, 960, 540), area, True, filters)
-
-
-def player_for(area: Rect, ideal: Rect = IDEAL, **kw) -> Player:
-    """The pen travel is fixed by ``ideal``; what the cursor does depends on the active ``area``."""
-    vw, vh = areafit.view_size(area)
-    iw, ih = areafit.view_size(ideal)
-    cu, cv = areafit.tablet_mm_to_area(area, ideal.x, ideal.y)
-    return Player(gain_x=iw / vw, gain_y=ih / vh, bias_x_mm=(cu - 0.5) * vw, bias_y_mm=(cv - 0.5) * vh,
-                  miss_rate=0.02, aim_noise_mm=0.25, **kw)
 
 
 def play(area: Rect, seed: int, ideal: Rect = IDEAL, **kw) -> PlayReport:

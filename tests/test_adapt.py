@@ -1,7 +1,6 @@
 """Tests for osu_tablet_assistant.engine.adapt (pure feel-axis adaptation)."""
 from __future__ import annotations
 
-import math
 import unittest
 from dataclasses import replace
 

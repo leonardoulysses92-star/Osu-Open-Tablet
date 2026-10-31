@@ -27,14 +27,11 @@ import bisect
 import math
 import random
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Callable, Sequence
+from typing import Any, Callable, Sequence
 
 from osu_tablet_assistant.engine import metrics
 from osu_tablet_assistant.gui.pen_sampler import PenSampler
 from osu_tablet_assistant.models import DisplaySpec, MetricsReport, PenSample
-
-if TYPE_CHECKING:  # pragma: no cover
-    import tkinter as tk
 
 KINDS = ("rate", "stillness", "tracking", "aim")
 ACTIVATIONS = ("touch", "center", "click")

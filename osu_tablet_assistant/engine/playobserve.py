@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import bisect
 import math
+import operator
 import random
 import statistics
 from typing import Sequence
@@ -87,11 +88,17 @@ class _Track:
     """Cursor samples as parallel lists with linear interpolation."""
 
     def __init__(self, samples: Sequence[PenSample]) -> None:
-        clean = sorted((s for s in samples if math.isfinite(s.t) and math.isfinite(s.x) and math.isfinite(s.y)),
-                       key=lambda s: s.t)
-        self.t = [s.t for s in clean]
-        self.x = [s.x for s in clean]
-        self.y = [s.y for s in clean]
+        t = [s.t for s in samples]
+        x = [s.x for s in samples]
+        y = [s.y for s in samples]
+        # Fast path (the recorder's samples are already ordered and finite): two cheap O(n) checks
+        # instead of a sort and an isfinite() per sample. Odd data takes the careful path.
+        ordered = all(map(operator.le, t, t[1:]))
+        if not (ordered and math.isfinite(math.fsum(t) + math.fsum(x) + math.fsum(y))):
+            clean = sorted((s for s in samples if math.isfinite(s.t) and math.isfinite(s.x) and math.isfinite(s.y)),
+                           key=lambda s: s.t)
+            t, x, y = [s.t for s in clean], [s.x for s in clean], [s.y for s in clean]
+        self.t, self.x, self.y = t, x, y
 
     def __bool__(self) -> bool:
         return len(self.t) >= 2
@@ -199,8 +206,8 @@ def _times(beatmap: Beatmap, scale: float) -> list[float]:
 
 def _end_time(capture: PlayCapture) -> float:
     ends = [capture.ended_at] if capture.ended_at is not None else []
-    if capture.samples:
-        ends.append(max(s.t for s in capture.samples))
+    if capture.samples:       # recorded in time order: the last one is the latest (a stray NaN is skipped)
+        ends += [s.t for s in capture.samples[-3:] if math.isfinite(s.t)]
     if capture.clicks:
         ends.append(max(c.t for c in capture.clicks))
     return max(ends) if ends else 0.0
@@ -538,16 +545,21 @@ def _detrended_rms(ts: list[float], xs: list[float], ys: list[float]) -> float:
 
 
 # ------------------------------------------------------------------ the report
-def analyze_play(beatmap: Beatmap, capture: PlayCapture, rows: int = 3, cols: int = 4, seed: int = 0
-                 ) -> PlayReport:
-    """Everything the coach learns from a (possibly partial) play. Deterministic for a given ``seed``; never raises."""
+def analyze_play(beatmap: Beatmap, capture: PlayCapture, rows: int = 3, cols: int = 4, seed: int = 0,
+                 detail: bool = True) -> PlayReport:
+    """Everything the coach learns from a (possibly partial) play. Deterministic for a given ``seed``; never raises.
+
+    ``detail=False`` is the cheap live view: alignment and per-object results only (no reach fit, zones or
+    feel), about 3x faster, for the picture that updates while the player is still playing.
+    """
     try:
-        return _analyze(beatmap, capture, rows, cols, seed)
+        return _analyze(beatmap, capture, rows, cols, seed, detail)
     except Exception:   # a live display must never die on odd data
         return PlayReport(warnings=(Reason("play.warn.analysis_failed"),), partial=capture.ended_at is None)
 
 
-def _analyze(beatmap: Beatmap, capture: PlayCapture, rows: int, cols: int, seed: int) -> PlayReport:
+def _analyze(beatmap: Beatmap, capture: PlayCapture, rows: int, cols: int, seed: int, detail: bool = True
+             ) -> PlayReport:
     objs = beatmap.judged_objects
     clicks = sorted(c.t for c in capture.clicks)
     track = _Track(capture.samples)
@@ -574,8 +586,9 @@ def _analyze(beatmap: Beatmap, capture: PlayCapture, rows: int, cols: int, seed:
     span = (min(c.t for c in capture.clicks) - 0.5, end)
     return PlayReport(
         alignment=align, n_objects=len(objs), n_judged=len(results), results=tuple(results),
-        cells=_cells(results, rows, cols), reach=_reach(results, capture, seed),
-        edges=_edges(results, geo.radius_mm), feel=_feel(track, geo, jumps, span),
+        cells=_cells(results, rows, cols) if detail else (), reach=_reach(results, capture, seed) if detail else None,
+        edges=_edges(results, geo.radius_mm) if detail else (),
+        feel=_feel(track, geo, jumps, span) if detail else None,
         miss_rate=misses / len(results) if results else 0.0,
         mean_err_ratio=(statistics.fmean(r.err_mm for r in clicked) / geo.radius_mm) if clicked else None,
         time_spread_ms=_mad(times) * 1.4826 if times else None, radius_mm=geo.radius_mm,

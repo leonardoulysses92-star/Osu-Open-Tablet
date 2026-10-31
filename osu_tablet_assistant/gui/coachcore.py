@@ -9,7 +9,7 @@ from __future__ import annotations
 import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Mapping, Sequence
+from typing import Callable, Mapping, Sequence
 
 from ..engine import adapt, findings as findings_mod, optimizer as opt
 from ..engine.beatmap import BeatmapIndex, find_beatmap, load_beatmap, parse_window_title
@@ -98,7 +98,7 @@ class CoachCore:
                  cache_path: Path | None = None, prefs: UserPreferences | None = None,
                  policy: adapt.TuningPolicy | None = None, catalog: Mapping[str, FilterSpec] | None = None,
                  aspect_lock: bool = True, allow_filters: bool = True, keys: Sequence[str] = DEFAULT_CLICK_KEYS,
-                 analyze: Callable[[Beatmap, Any], PlayReport] = analyze_play,
+                 analyze: Callable[..., PlayReport] = analyze_play,
                  clock: Callable[[], float] = time.monotonic) -> None:
         self.tuner, self.tablet, self.display = tuner, tablet, display
         self.keys = tuple(keys)
@@ -204,7 +204,7 @@ class CoachCore:
         """Judge the partial capture (blocking: the window calls it from a worker thread)."""
         if self.recorder is None or self.beatmap is None:
             return None
-        report = self._analyze(self.beatmap, self.recorder.snapshot())
+        report = self._analyze(self.beatmap, self.recorder.snapshot(), detail=False)
         self.live_report = report
         return report
 

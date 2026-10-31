@@ -138,6 +138,21 @@ class RobustnessTests(unittest.TestCase):
         self.assertGreater(part.n_judged, 20)
         self.assertAlmostEqual(part.alignment.offset_ms, 123010.0, delta=15.0)
 
+    def test_live_mode_matches_the_full_alignment_and_is_faster(self) -> None:
+        big = make_map(seed=7, n=400, gap_ms=300.0)
+        capture = simulate(big, Player(hz=500.0), seed=2)
+        full, live = po.analyze_play(big, capture), po.analyze_play(big, capture, detail=False)
+        self.assertEqual(live.alignment, full.alignment)
+        self.assertEqual(live.results, full.results)
+        self.assertEqual((live.cells, live.edges, live.reach, live.feel), ((), (), None, None))
+        self.assertLess(min(self._time(big, capture, False) for _ in range(3)),
+                        min(self._time(big, capture, True) for _ in range(3)))
+
+    def test_samples_with_odd_ordering_still_work(self) -> None:
+        capture = simulate(MAP, Player(), seed=1)
+        shuffled = tuple(reversed(capture.samples[:50])) + capture.samples[50:]
+        self.assertTrue(po.analyze_play(MAP, replace(capture, samples=shuffled)).trusted)
+
     def test_early_capture_does_not_crash_and_says_not_enough(self) -> None:
         capture = simulate(MAP, Player(), seed=1, stop_after_s=2.0)
         report = po.analyze_play(MAP, capture)
@@ -173,9 +188,9 @@ class RobustnessTests(unittest.TestCase):
         self.assertLess(best_full, 0.2, f"{best_full * 1000:.0f} ms")
 
     @staticmethod
-    def _time(beatmap, capture) -> float:
+    def _time(beatmap, capture, detail: bool = True) -> float:
         start = time.perf_counter()
-        po.analyze_play(beatmap, capture)
+        po.analyze_play(beatmap, capture, detail=detail)
         return time.perf_counter() - start
 
 

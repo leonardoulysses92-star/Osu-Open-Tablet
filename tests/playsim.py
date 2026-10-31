@@ -34,6 +34,17 @@ class Player:
     hz: float = 1000.0
 
 
+def player_for(area: Rect, ideal: Rect, **kw) -> Player:
+    """The pen travel is fixed by ``ideal``; what the cursor does depends on the active ``area``."""
+    from osu_tablet_assistant.engine import areafit
+
+    vw, vh = areafit.view_size(area)
+    iw, ih = areafit.view_size(ideal)
+    cu, cv = areafit.tablet_mm_to_area(area, ideal.x, ideal.y)
+    return Player(gain_x=iw / vw, gain_y=ih / vh, bias_x_mm=(cu - 0.5) * vw, bias_y_mm=(cv - 0.5) * vh,
+                  miss_rate=0.02, aim_noise_mm=0.25, **kw)
+
+
 def make_map(seed: int = 1, n: int = 120, gap_ms: float = 280.0, od: float = 8.0, cs: float = 4.0,
              fast_every: int = 0) -> Beatmap:
     rng = random.Random(seed)

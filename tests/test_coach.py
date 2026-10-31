@@ -12,7 +12,7 @@ from osu_tablet_assistant.gui import coachcore as coach, mapgeometry as tm, play
 from osu_tablet_assistant.gui.pen_sampler import PenSampler
 from osu_tablet_assistant.models import ApplyResult, DisplaySpec, Rect, TabletSpec
 from osu_tablet_assistant.otd.livetune import LiveTuner, OsuWatcher, ProcessEntry
-from playsim import Player, make_map, simulate
+from playsim import make_map, player_for, simulate
 from test_livetune import CTL472, user_settings
 
 USER_AREA = Rect(71.66, 41.44, 80.17, 26.72, 180.0)
@@ -31,12 +31,8 @@ OverallDifficulty:8
 """ + "\n".join(f"{o.x:.0f},{o.y:.0f},{o.time_ms:.0f},1,0" for o in MAP.objects)
 
 
-def player_for(area: Rect, ideal: Rect = IDEAL) -> Player:
-    vw, vh = areafit.view_size(area)
-    iw, ih = areafit.view_size(ideal)
-    cu, cv = areafit.tablet_mm_to_area(area, ideal.x, ideal.y)
-    return Player(gain_x=iw / vw, gain_y=ih / vh, bias_x_mm=(cu - 0.5) * vw, bias_y_mm=(cv - 0.5) * vh,
-                  miss_rate=0.02, aim_noise_mm=0.25)
+def _player(area: Rect):
+    return player_for(area, IDEAL)
 
 
 class FakeRecorder:
@@ -44,7 +40,7 @@ class FakeRecorder:
     keys_available = True
 
     def __init__(self, area: Rect, seed: int, clicks_idle: float | None = None, few_clicks: bool = False) -> None:
-        capture = simulate(MAP, player_for(area), seed=seed, area=area, display=DISPLAY, t0=30.0)
+        capture = simulate(MAP, _player(area), seed=seed, area=area, display=DISPLAY, t0=30.0)
         capture = replace(capture, samples=capture.samples[::3])
         if few_clicks:
             capture = replace(capture, clicks=capture.clicks[:4])
