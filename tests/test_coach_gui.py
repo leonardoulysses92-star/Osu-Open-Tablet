@@ -153,6 +153,14 @@ def click(num: int):
     return SimpleNamespace(keysym="??", keycode=0, num=num, widget=None)
 
 
+def _safe_text(widget) -> str | None:
+    """The text of a widget that has one (None for the ones that do not)."""
+    try:
+        return str(widget.cget("text"))
+    except tk.TclError:
+        return None
+
+
 class FakeSession:
     """Just what the coach uses of a wizard session for the click keys: the config and its save."""
 
@@ -436,6 +444,34 @@ class AreaAndSmoothingCardTests(unittest.TestCase):
             out.append(child)
             out += self._all(child)
         return out
+
+    def test_the_smoothing_card_offers_less_and_more_and_warns_about_too_much(self) -> None:
+        from dataclasses import replace
+        from osu_tablet_assistant.models import ProfileChanges
+        radial_screen = "RadialFollow.RadialFollowSmoothingScreenSpace"
+        win = self.window()
+        win.smooth_card.toggle_open()
+        win.smooth_try(radial_screen)
+        win.root.update()
+        shown = self.texts(win.root)
+        self.assertIn(i18n.t("play.smooth.less"), shown)
+        self.assertIn(i18n.t("play.smooth.more"), shown)
+        self.assertIn(i18n.t("play.smooth.level", level=3, of=5) + " · " + i18n.t("play.smooth.recommended"), shown)
+        self.assertNotIn(i18n.t("play.smooth.high", ms="x", limit="x")[:20], shown)       # no warning yet
+        win.smooth_step(radial_screen, 1)
+        win.root.update()
+        self.assertIn(i18n.t("play.smooth.level", level=4, of=5), self.texts(win.root))
+        heavy = tuple(replace(fc, enabled=True, settings={**fc.settings, "Latency": 16.0}) if fc.path == self.HAWKU
+                      else fc for fc in self.env.core.profile.filters)
+        self.env.core.tuner.propose(ProfileChanges(filters=heavy))
+        win.show_phase("prepare")
+        win.smooth_card.toggle_open()
+        win.root.update()
+        shown = self.texts(win.root)
+        self.assertIn("demasiado suavizado", shown)                                       # the warning, first thing
+        more = [b for b in self._all(win.smooth_card) if getattr(b, "cget", None) and
+                _safe_text(b) == i18n.t("play.smooth.more")]
+        self.assertTrue(more and str(more[0].cget("state")) == "disabled")                # more is not offered
 
     def test_the_smoothing_card_is_compact_until_opened_and_try_switches_the_filter_on(self) -> None:
         win = self.window()

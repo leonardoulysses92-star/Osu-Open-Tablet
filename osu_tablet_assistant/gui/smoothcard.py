@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import tkinter as tk
 from tkinter import ttk
-from typing import Callable, Sequence
+from typing import Any, Callable, Sequence
 
 from .coachcore import SmoothOption, fmt_num
 from .widgets import Card, Chip, WrapLabel, button, check, frame, label, px
@@ -33,9 +33,11 @@ class SmoothingCard(Card):
     """Card with one row per offered smoothing filter (see the module docstring)."""
 
     def __init__(self, parent: tk.Misc, options: Sequence[SmoothOption], translate: Translate,
-                 on_try: Callable[[str], None], on_stop: Callable[[str], None], state: dict | None = None) -> None:
+                 on_try: Callable[[str], None], on_stop: Callable[[str], None], state: dict | None = None,
+                 on_step: Callable[[str, int], None] | None = None, assessment: Any = None) -> None:
         super().__init__(parent, translate("play.smooth.title"), padding=12)
         self.t, self.options, self.on_try, self.on_stop = translate, list(options), on_try, on_stop
+        self.on_step, self.assessment = on_step, assessment      # less / more smoothing; "too much already" warning
         self.state = state if state is not None else {}
         self.summary = frame(self.header)
         self.summary.pack(side="left", padx=(px(self, 10), 0))
@@ -73,6 +75,10 @@ class SmoothingCard(Card):
 
     def _build_details(self) -> None:
         box = self.details
+        a = self.assessment
+        if a is not None and a.level != "ok":          # the player already has a lot of smoothing: say so first
+            WrapLabel(box, self.t(f"play.smooth.{a.level}", ms=fmt_num(a.total_ms, self.t), limit=fmt_num(
+                a.high_ms if a.level == "high" else a.warn_ms, self.t)), "Accent").pack(fill="x", pady=(0, px(self, 6)))
         WrapLabel(box, self.t("play.smooth.intro"), "Body").pack(fill="x")
         WrapLabel(box, self.t("play.smooth.players"), "Small").pack(fill="x", pady=(px(self, 2), px(self, 6)))
         for option in (o for o in self.options if o.installed and (o.trying or not o.on)):
@@ -108,6 +114,29 @@ class SmoothingCard(Card):
         if option.trying:
             WrapLabel(row, self.t("play.smooth.decided_note" if option.decided else "play.smooth.trying_note"),
                       "Accent").pack(fill="x")
+        if option.on and option.levels > 1 and self.on_step is not None:
+            self._amount(row, option)
+
+    def _amount(self, parent: tk.Misc, option: SmoothOption) -> None:
+        """Less / more smoothing, with where the current level comes from (the community or gentle values)."""
+        line = frame(parent)
+        line.pack(fill="x", pady=(px(self, 4), 0))
+        level = option.level if option.level is not None else option.levels // 2
+        less = button(line, self.t("play.smooth.less"), lambda p=option.path: self.on_step(p, -1), kind="secondary")
+        less.pack(side="left")
+        more = button(line, self.t("play.smooth.more"), lambda p=option.path: self.on_step(p, 1), kind="secondary")
+        more.pack(side="left", padx=(px(self, 6), 0))
+        if level <= 0:
+            less.configure(state="disabled")
+        if level >= option.levels - 1 or (self.assessment is not None and self.assessment.level == "high"):
+            more.configure(state="disabled")
+        text = self.t("play.smooth.level", level=level + 1, of=option.levels)
+        if level == option.levels // 2:
+            text += " · " + self.t("play.smooth.recommended")
+        label(line, text, "Small").pack(side="left", padx=(px(self, 10), 0))
+        source = self.t("play.smooth.source.community", n=option.n_presets) if option.source == "community" \
+            else self.t("play.smooth.source.gentle")
+        WrapLabel(parent, source, "Small").pack(fill="x")
 
     def _switched(self, path: str) -> None:
         """The owner applies it and refreshes the screen (this card may be rebuilt: last thing done here)."""

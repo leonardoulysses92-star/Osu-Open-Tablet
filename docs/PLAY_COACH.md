@@ -335,3 +335,20 @@ languages), `test_hotspots.py` (a player who stops
 short only in a small corner patch: found by the fine grids, smeared by the coarse one, no false alarms,
 speed), `test_keys.py` (names, virtual-key codes, Tk events, the choice), `test_beatmap.py`, `test_areafit.py`,
 `test_findings.py`, `test_coach.py`, `test_coach_gui.py` (the click-button card with synthetic key events).
+
+## More or less smoothing, with the community's recommendation
+
+Once a smoothing filter is on in the coach ("Suavizado" card), it has five levels from "very little" to "a lot"
+(`engine/smoothing.ladder`). The middle one is **what the community uses**: the median of the filter's values in
+the five community presets closest to the player's tablet and area (adapted to the player's area, see
+`engine/community.adapt_preset`); when fewer than two presets use that filter, cautious fixed values are used and
+the card says so. The other levels scale the recommended amount (x0.5, x0.75, x1, x1.4, x2; Radial Follow also
+moves its coefficient; the coefficient never goes above 0.99). "Less / More smoothing" moves one level, live,
+undoable, and not saved until "Guardar estos ajustes".
+
+**Too much smoothing warning.** The coach estimates the extra delay of all enabled filters together
+(`recommend.chain_latency`). From 8 ms the card warns that the player already has quite a lot of smoothing; from
+15 ms it refuses to go to a higher level (going down is always allowed) and asks to lower a level or remove a
+filter. Both limits are rough heuristics, not calibrated on real players, and the delay is an estimate; the
+player can still set anything in OpenTabletDriver itself. Filters without one single "amount" value (for example
+Kuuube's chatter filters) have no levels.

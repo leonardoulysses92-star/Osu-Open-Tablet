@@ -341,7 +341,8 @@ class CoachWindow:
         for child in self._smooth_holder.winfo_children():
             child.destroy()
         self.smooth_card = SmoothingCard(self._smooth_holder, self.core.smoothing_options(), self.t,
-                                         self.smooth_try, self.smooth_stop, self._smooth_state)
+                                         self.smooth_try, self.smooth_stop, self._smooth_state,
+                                         self.smooth_step, self.core.smoothing_assessment())
         self.smooth_card.pack(fill="x")
 
     def _refresh_prepare(self) -> None:
@@ -376,6 +377,10 @@ class CoachWindow:
 
     def smooth_stop(self, path: str) -> None:
         self._smooth_action(lambda: self.core.stop_smoothing(path))
+
+    def smooth_step(self, path: str, delta: int) -> None:
+        """"Menos / Más suavizado": one level down or up the filter's ladder."""
+        self._smooth_action(lambda: self.core.smoothing_step(path, delta))
 
     def smooth_keep(self, path: str) -> None:
         self._smooth_action(lambda: self.core.keep_smoothing(path))

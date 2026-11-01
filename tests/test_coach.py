@@ -548,6 +548,42 @@ class SmoothingTests(unittest.TestCase):
         env.core.stop_smoothing(RADIAL_SCREEN)
         self.assertIsNone(self.store(env, RADIAL_SCREEN))
 
+    def test_more_and_less_smoothing_move_along_the_ladder(self) -> None:
+        env = Env(self)
+        self.assertTrue(env.core.try_smoothing(RADIAL_SCREEN).ok)           # starts at the recommended middle level
+        outer = lambda: self.store(env, RADIAL_SCREEN).settings["OuterRadius"]
+        option = next(o for o in env.core.smoothing_options() if o.path == RADIAL_SCREEN)
+        self.assertEqual((option.level, option.levels, option.source), (2, 5, "gentle"))
+        self.assertEqual(outer(), 5.0)
+        fb = env.core.smoothing_step(RADIAL_SCREEN, 1)
+        self.assertTrue(fb.ok and fb.live_only)
+        self.assertGreater(outer(), 5.0)                                     # more smoothing
+        self.assertEqual(env.written, [])                                    # live, not saved
+        env.core.smoothing_step(RADIAL_SCREEN, -1)
+        self.assertEqual(outer(), 5.0)
+        for _ in range(6):                                                   # the ladder has an end
+            env.core.smoothing_step(RADIAL_SCREEN, -1)
+        low = outer()
+        env.core.smoothing_step(RADIAL_SCREEN, -1)
+        self.assertEqual(outer(), low)
+        self.assertEqual(env.core.smoothing_step(HAWKU, 1).message.key, "play.smooth.not_on")   # only filters that are on
+
+    def test_too_much_smoothing_is_warned_about_and_more_is_refused(self) -> None:
+        from dataclasses import replace
+        from osu_tablet_assistant.models import FilterConfig, ProfileChanges
+        env = Env(self)
+        self.assertEqual(env.core.smoothing_assessment().level, "ok")
+        heavy = tuple(replace(fc, enabled=True, settings={**fc.settings, "Latency": 16.0}) if fc.path == HAWKU else fc
+                      for fc in env.core.profile.filters)
+        self.assertTrue(env.core.tuner.propose(ProfileChanges(filters=heavy)).accepted)
+        self.assertEqual(env.core.smoothing_assessment().level, "high")
+        self.assertTrue(env.core.try_smoothing(RADIAL_SCREEN).ok)
+        before = self.store(env, RADIAL_SCREEN)
+        fb = env.core.smoothing_step(RADIAL_SCREEN, 1)                       # more smoothing: refused
+        self.assertEqual((fb.ok, fb.message.key), (False, "play.smooth.too_much"))
+        self.assertEqual(self.store(env, RADIAL_SCREEN), before)
+        self.assertTrue(env.core.smoothing_step(RADIAL_SCREEN, -1).ok)       # less is always allowed
+
     def test_not_installed_or_observing_changes_nothing(self) -> None:
         env = Env(self)
         fb = env.core.try_smoothing(ANTICHATTER)

@@ -271,6 +271,10 @@ class SmoothOption:
     trying: bool                         # switched on here, to try
     decided: bool
     delay_ms: float | None               # estimated extra delay with the values it runs (or would run) with
+    level: int | None = None             # 0..levels-1: where its values are on the less/more ladder (None: unknown)
+    levels: int = 0                      # 0: this filter has no single "amount" to move
+    source: str = ""                     # "community" | "gentle": where the recommended middle level comes from
+    n_presets: int = 0                   # community presets behind a "community" ladder
 
 
 @dataclass(frozen=True)
@@ -771,11 +775,18 @@ class CoachCore:
             on = fc is not None and fc.enabled
             orig_idx = smoothing.find(self._original_filters, path)
             was_on = orig_idx is not None and self._original_filters[orig_idx].enabled and path not in self.trials
-            values = fc.settings if on else smoothing.start_settings(spec, fc.settings if fc else None)[0]
+            ladder = self.smoothing_ladder(path)
+            base = ladder.levels[ladder.recommended] if ladder is not None else None
+            values = fc.settings if on else smoothing.start_settings(spec, fc.settings if fc else None, base)[0]
             trial = self.trials.get(path)
+            adjustable = ladder is not None and ladder.adjustable
             out.append(SmoothOption(path, spec.display_name, smoothing.text_id(path), path in installed, on,
                                     was_on, trial is not None, bool(trial and trial.decided),
-                                    smoothing.delay_ms(path, values, rate, mm_per_px)))
+                                    smoothing.delay_ms(path, values, rate, mm_per_px),
+                                    ladder.level_of(values) if adjustable else None,
+                                    len(ladder.levels) if adjustable else 0,
+                                    ladder.source if ladder is not None else "",
+                                    ladder.n_presets if ladder is not None else 0))
         out.sort(key=lambda o: not o.installed)
         return out
 
@@ -792,7 +803,9 @@ class CoachCore:
         if idx is not None and live[idx].enabled:
             return CoachFeedback(False, message=Reason("play.smooth.already_on", {"name": spec.display_name}),
                                  sound="error")
-        filters, previous, own = smoothing.enable(live, path, self.catalog)
+        ladder = self.smoothing_ladder(path)       # starts at the recommended level (the community's median)
+        base = ladder.levels[ladder.recommended] if ladder is not None else None
+        filters, previous, own = smoothing.enable(live, path, self.catalog, base)
         fb = self._send(ProfileChanges(filters=filters))
         if not fb.ok:
             return fb
@@ -803,6 +816,72 @@ class CoachCore:
         notes = (Reason("play.smooth.own_values"),) if own else ()
         return CoachFeedback(True, notes, Reason("play.smooth.on", {"name": spec.display_name}), "keep",
                              live_only=True)
+
+    def _ranked_presets(self) -> list:
+        """The community presets, closest to this tablet and area first (none when they cannot be loaded)."""
+        try:
+            from ..engine import community
+            from ..knowledge import presets as kpresets
+            return community.rank_presets(kpresets.load_presets().presets, self.tablet, self.area, self.profile)
+        except Exception:
+            return []
+
+    def smoothing_ladder(self, path: str) -> "smoothing.Ladder | None":
+        """Five levels of smoothing for a filter, the middle one being what the community uses (or gentle values)."""
+        spec = self.catalog.get(path)
+        return None if spec is None else smoothing.ladder(spec, self._ranked_presets(), self.area, self.catalog)
+
+    def smoothing_assessment(self) -> "smoothing.Assessment":
+        """Is the player already using a lot of smoothing? (estimated delay of every enabled filter together)"""
+        rate, mm_per_px = self._rate_and_scale()
+        return smoothing.assess(self.profile.filters, rate, mm_per_px)
+
+    def set_smoothing_level(self, path: str, level: int) -> CoachFeedback:
+        """Less or more smoothing for a filter that is on: move to ``level`` of its ladder (live, undoable).
+
+        Going to a level with more smoothing is refused once the estimated total delay is already high.
+        """
+        spec = self.catalog.get(path)
+        name = spec.display_name if spec is not None else path
+        live = self.profile.filters
+        idx = smoothing.find(live, path)
+        if self.phase == "observe":
+            return CoachFeedback(False, message=Reason("play.manual.not_now"), sound="error")
+        if spec is None or idx is None or not live[idx].enabled:
+            return CoachFeedback(False, message=Reason("play.smooth.not_on", {"name": name}), sound="error")
+        ladder = self.smoothing_ladder(path)
+        if ladder is None or not ladder.adjustable:
+            return CoachFeedback(False, message=Reason("play.smooth.no_levels", {"name": name}), sound="error")
+        level = max(0, min(level, len(ladder.levels) - 1))
+        current = ladder.level_of(live[idx].settings)
+        rate, mm_per_px = self._rate_and_scale()
+        before = smoothing.assess(live, rate, mm_per_px)
+        if current is not None and level > current and before.level == "high":
+            return CoachFeedback(False, message=Reason("play.smooth.too_much", {
+                "ms": fmt_num(before.total_ms), "limit": fmt_num(before.high_ms)}), sound="error")
+        values = dict(live[idx].settings)
+        values.update(ladder.levels[level])
+        out = list(live)
+        out[idx] = FilterConfig(path, True, values)
+        fb = self._send(ProfileChanges(filters=tuple(out)))
+        if not fb.ok:
+            return fb
+        self._touched.add(path)
+        self._hand_change("smoothing")
+        after = smoothing.assess(out, rate, mm_per_px)
+        notes = (Reason("play.smooth.warn_" + after.level, {"ms": fmt_num(after.total_ms)}),) \
+            if after.level != "ok" else ()
+        return CoachFeedback(True, notes, Reason("play.smooth.level_set", {
+            "name": name, "level": level + 1, "of": len(ladder.levels)}), "keep", live_only=True)
+
+    def smoothing_step(self, path: str, delta: int) -> CoachFeedback:
+        """One level less (-1) or more (+1) smoothing than now."""
+        ladder = self.smoothing_ladder(path)
+        live = self.profile.filters
+        idx = smoothing.find(live, path)
+        current = ladder.level_of(live[idx].settings) if ladder is not None and idx is not None else None
+        base = ladder.recommended if ladder is not None else 0
+        return self.set_smoothing_level(path, (base if current is None else current) + delta)
 
     def stop_smoothing(self, path: str) -> CoachFeedback:
         """"Quitarlo": switch the trial off again, with the values it had before (or take it out of the chain)."""
