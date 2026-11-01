@@ -16,6 +16,10 @@ unificó en 0.8.0.
 
 <!-- versiones-nuevas-aqui -->
 
+## 0.8.1 (2026-11-01)
+
+- Suavizado con cinco niveles segun la comunidad, botones de menos y mas suavizado y aviso cuando ya hay demasiado
+
 ## 0.8.0 (2026-10-31)
 
 - Coach de partidas: la comparación entre rondas pasa a un resumen compacto (primera, mejor y última ronda con
