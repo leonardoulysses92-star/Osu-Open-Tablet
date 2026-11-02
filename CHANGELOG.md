@@ -5,6 +5,10 @@ Lo que cambió en cada versión, de la más nueva a la más antigua. Cada una ti
 
 <!-- versiones-nuevas-aqui -->
 
+## 0.9.1 (2026-11-02)
+
+- Interfaz mas simple con lo avanzado plegado, limpieza del codigo y documentacion reescrita; el actualizador ignora datos mas viejos que los incluidos
+
 ## 0.9.0 (2026-11-01)
 
 - El coach aprende tus hábitos a lo largo de varias partidas (hacia dónde caen tus clics, si te quedas corto
