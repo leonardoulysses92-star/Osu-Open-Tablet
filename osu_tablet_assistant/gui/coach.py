@@ -26,7 +26,7 @@ from tkinter import filedialog, messagebox, ttk
 from typing import Any, Callable
 
 from ..appconfig import app_data_dir
-from ..engine import adapt, optimizer as opt
+from ..engine import adapt, habitstore, optimizer as opt
 from ..engine.playtypes import PlayReport
 from ..keys import KeyChoice, display_list
 from ..models import Reason
@@ -38,12 +38,13 @@ from .companion import companion_args_from_session, make_click_through
 from .i18n import t as default_t
 from .keycard import ClickKeysCard
 from .smoothcard import SmoothingCard
+from .stylecard import StyleCard
 from .tabletmap import TabletMap
 from .widgets import (COLORS, Card, Chip, Expander, Notice, ScrollFrame, WrapLabel, apply_theme, bullets, button,
                       check, dark_title_bar, frame, icon_image, label, px, surface_color)
 
 TICK_MS = 100
-MAP_POLL_S = 1.0       # how often osu!'s window title is read to notice a new map
+MAP_POLL_S = 0.1       # how often osu!'s window title is read (one cheap window enumeration; lookups are O(1))
 MAP_NOTE_S = 6.0       # how long "new map recognised" replaces the status line while observing
 COACH_HOTKEY = "ctrl+alt+p"
 
@@ -105,6 +106,8 @@ class CoachWindow:
         self._keys_state: dict = {"open": False}       # the key card stays open across screen refreshes
         self._smooth_state: dict = {"open": False}     # ... and so do the smoothing card ...
         self._manual_state: dict = {"open": False}     # ... and "Ajustar el área a mano"
+        self._style_state: dict = {}                   # ... and "Tu estilo de juego" (opens itself when it acts)
+        self.style_card: StyleCard | None = None
         self.smooth_card: SmoothingCard | None = None
         self._area_holder: ttk.Frame | None = None
         self._smooth_holder: ttk.Frame | None = None
@@ -160,8 +163,9 @@ class CoachWindow:
                                                               "tune_only")),
                                     frozenset(args.get("available_filters", ())))
         cache = app_data_dir() / "beatmap_index.json"
-        return CoachCore(tuner, args.get("tablet"), display, prefs=prefs, policy=policy, cache_path=cache,
-                         **kwargs)
+        core = CoachCore(tuner, args.get("tablet"), display, prefs=prefs, policy=policy, cache_path=cache, **kwargs)
+        core.use_habit_store(habitstore.HabitStore(app_data_dir() / habitstore.FILE_NAME))   # habits stay on this PC
+        return core
 
     # ----------------------------------------------------------------- phases
     def show_phase(self, phase: str) -> None:
@@ -524,6 +528,7 @@ class CoachWindow:
             WrapLabel(card.body, self.t("play.report.live_note"), "Small").pack(fill="x", pady=(px(self.root, 4), 0))
         elif proposal.message:
             WrapLabel(self.body, self._say(proposal.message), "Muted").pack(fill="x", pady=(0, px(self.root, 8)))
+        self._build_style_card()
         holder = frame(self.body)
         holder.pack(fill="x", pady=(0, px(self.root, 8)))
         self._build_area_card(holder, editable=False, proposed=proposal.area if proposal.kind != "none" else None)
@@ -533,6 +538,10 @@ class CoachWindow:
             WrapLabel(self.body, self.t("play.replay.used"), "Small").pack(fill="x", pady=(0, px(self.root, 6)))
         elif result.check is not None:
             self._build_check(result.check)
+        if result.pointer:                              # replay calibration / cursor trust (engine.calibrate)
+            card = Card(self.body, self.t("play.report.pointer_title"), padding=12)
+            card.pack(fill="x", pady=(0, px(self.root, 8)))
+            bullets(card.body, [self._say(r) for r in result.pointer[:4]], role="Small").pack(fill="x")
         done = proposal.kind == "none"
         self.status = Notice(self.footer)               # the whole action bar stays visible while the report scrolls
         self.status.pack(fill="x", pady=(0, px(self.root, 6)))
@@ -563,6 +572,25 @@ class CoachWindow:
         tech = Expander(self.body, self.t("gui.details.title"), height=8)
         tech.pack(fill="x", pady=(px(self.root, 6), 0))
         tech.set(self._technical_text(report, result))
+
+    def _build_style_card(self) -> None:
+        """"Tu estilo de juego": the habits seen over the plays, and what the setup does to suit them."""
+        style = self.core.style
+        if style is None:
+            return
+        profile = self.core.habit_profile
+        self.style_card = StyleCard(self.body, style, self.t, self.forget_habits, self._style_state,
+                                    profile.warnings if profile is not None else ())
+        self.style_card.pack(fill="x", pady=(0, px(self.root, 8)))
+
+    def forget_habits(self) -> None:
+        """"Olvidar mis hábitos" (after a yes): the stored habits are deleted and the card starts over."""
+        if not messagebox.askyesno(self.t("play.title"), self.t("play.style.forget_confirm"), parent=self.root):
+            return
+        fb = self.core.forget_habits()
+        if self.core.phase == "report" and self.core.result is not None:
+            self.show_phase("report")
+        self._notify(fb)
 
     def _build_smooth_verdict(self, verdict: Any) -> None:
         """"Con el suavizado: mejor / igual / peor" for one trial, and the player's two choices."""
@@ -730,7 +758,7 @@ class CoachWindow:
             else self.t("play.prepare.map_missing")
 
     def _tick_map(self) -> None:
-        """Once a second: did osu! load another map? (it names the map in its title only while playing)"""
+        """Ten times a second: did osu! load another map? (it names the map in its title only while playing)"""
         now = time.monotonic()
         if now - self._last_map_poll < MAP_POLL_S:
             return

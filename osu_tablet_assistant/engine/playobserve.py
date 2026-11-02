@@ -263,17 +263,18 @@ class _Geometry:
     def __init__(self, capture: PlayCapture, beatmap: Beatmap) -> None:
         d = capture.display
         self.display = d
+        self.box = capture.playfield        # osu!'s measured window, else full screen on the display
         self.left = d.offset_x - d.width_px / 2
         self.top = d.offset_y - d.height_px / 2
         vw, vh = areafit.view_size(capture.area)
         self.mm_x = vw / d.width_px if d.width_px else 0.0
         self.mm_y = vh / d.height_px if d.height_px else 0.0
-        self.scale = playfield_scale(d)
+        self.scale = playfield_scale(d, self.box)
         self.radius_px = circle_radius_osu_px(beatmap.cs) * self.scale
         self.radius_mm = self.radius_px * (self.mm_x + self.mm_y) / 2.0
 
     def object_px(self, x: float, y: float, flip: bool) -> tuple[float, float]:
-        return playfield_to_desktop(x, 384.0 - y if flip else y, self.display)
+        return playfield_to_desktop(x, 384.0 - y if flip else y, self.display, self.box)
 
     def to_mm(self, dx_px: float, dy_px: float) -> tuple[float, float]:
         return dx_px * self.mm_x, dy_px * self.mm_y
@@ -283,8 +284,8 @@ class _Geometry:
 
     def playfield_uv(self) -> tuple[float, float, float, float]:
         """The playfield's extent in normalized area coordinates ``(u_left, v_top, u_right, v_bottom)``."""
-        u0, v0 = self.uv(*playfield_to_desktop(0.0, 0.0, self.display))
-        u1, v1 = self.uv(*playfield_to_desktop(512.0, 384.0, self.display))
+        u0, v0 = self.uv(*playfield_to_desktop(0.0, 0.0, self.display, self.box))
+        u1, v1 = self.uv(*playfield_to_desktop(512.0, 384.0, self.display, self.box))
         return u0, v0, u1, v1
 
 

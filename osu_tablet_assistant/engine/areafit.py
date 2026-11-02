@@ -131,6 +131,26 @@ def shift_area(area: Rect, dx_mm: float, dy_mm: float, tablet: TabletSpec | None
     return moved, tuple(reasons)
 
 
+def rotate_area(area: Rect, degrees: float, tablet: TabletSpec | None) -> tuple[Rect, tuple[Reason, ...]]:
+    """Turn the area by ``degrees`` about its centre (same sign convention as ``Rect.rotation``), clamped so the
+    rotated area stays on the tablet. A small turn away from 0 / 180 is a rotation OTD was never checked with
+    here, so the reasons say so."""
+    if not math.isfinite(degrees) or abs(degrees) < 1e-6:
+        return area, (Reason("play.area.no_room"),)
+    turned = replace(area, rotation=round((area.rotation + degrees) % 360.0, AREA_DECIMALS))
+    if tablet is not None:
+        ew, eh = extent(turned)
+        if ew > tablet.width_mm + _EPS or eh > tablet.height_mm + _EPS:
+            return area, (Reason("play.area.no_room"),)
+    out, clamped = _clamp_center(turned, tablet)
+    reasons = [Reason("play.area.rotate", {"from": _fmt(area.rotation), "to": _fmt(out.rotation)})]
+    if clamped:
+        reasons.append(Reason("play.area.clamped"))
+    if not rotation_verified(out):
+        reasons.append(Reason("play.area.rotation_unverified", {"rotation": _fmt(out.rotation)}))
+    return out, tuple(reasons)
+
+
 def scale_area_axes(area: Rect, sx: float, sy: float, tablet: TabletSpec | None, *,
                     lock_aspect: bool = True, anchor: tuple[float, float] = (0.5, 0.5)
                     ) -> tuple[Rect, tuple[Reason, ...]]:

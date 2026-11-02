@@ -13,8 +13,10 @@ from pathlib import Path
 from typing import Callable, Mapping, Sequence
 
 from ..engine import adapt, areafit, findings as findings_mod, optimizer as opt, replay as replay_mod
-from ..engine import smoothing
-from ..engine.beatmap import BeatmapIndex, find_beatmap, load_beatmap, parse_window_title
+from ..engine import calibrate as calibrate_mod, osucfg, smoothing
+from ..engine import habits as habits_mod, habitstore, rulebook
+from ..engine.beatmap import load_beatmap, parse_window_title
+from ..engine.mapindex import MapFinder
 from ..engine.playobserve import ALIGN_TRUST, analyze_play
 from ..engine.playtypes import DEFAULT_DETAIL, Beatmap, Convergence, PlayCapture, PlayReport, grid_for
 from ..keys import DEFAULT_CLICK_KEYS, PEN_TIP_KEY, display_list, normalize_keys
@@ -24,8 +26,9 @@ from ..otd import settings_io
 from ..otd.livetune import LiveTuner, OsuWatcher
 from ..otd.plugins import KNOWN_PLUGINS
 from .i18n import t as default_t
-from .pen_sampler import PenSampler
-from .playwatch import LiveView, PlayRecorder, osu_window_title, songs_dir_for, windows_key_source
+from .pen_sampler import PenSampler, osu_playfield_box
+from .playwatch import (TITLE_LEAD_S, LiveView, PlayRecorder, osu_window_title, songs_dir_for, title_kind,
+                        windows_key_source)
 
 ANALYSIS_EVERY_S = 1.5
 AUTO_STOP_IDLE_S = 8.0
@@ -35,7 +38,7 @@ NO_CLICKS_TRAVEL_SCREENS = 2.0  # ... "moving" = the cursor travelled this many 
 PHASES = ("prepare", "observe", "report")
 Translate = Callable[..., str]
 # Everything the coach and its helpers collect, nothing more (each id has a ``play.data.<id>`` text).
-DATA_LEDGER = ("cursor", "keys", "window", "map", "replay", "profile", "never")
+DATA_LEDGER = ("cursor", "keys", "window", "map", "replay", "profile", "habits", "never")
 # Adjusting the area by hand ("Ajustar el área a mano"): one press = this much, in the player's view.
 MANUAL_SIZE_STEP = 0.02         # 2 % bigger / smaller
 MANUAL_MOVE_MM = 0.5
@@ -44,7 +47,7 @@ MANUAL_SIZES = {"smaller": (-1, -1), "bigger": (1, 1), "narrower": (-1, 0), "wid
                 "shorter": (0, -1), "taller": (0, 1)}
 FREE_ONLY = ("narrower", "wider", "shorter", "taller")       # one axis only: needs the free proportion
 # Reasons whose float parameters are numbers to show with the language's decimal mark.
-_LOCAL_NUMBERS = ("play.probe.", "play.smooth.", "play.manual.")
+_LOCAL_NUMBERS = ("play.probe.", "play.smooth.", "play.manual.", "play.calib.", "play.rule.", "play.style.")
 
 
 def fmt_num(value: float, translate: Translate = default_t, decimals: int = 1) -> str:
@@ -178,6 +181,7 @@ class RoundResult:
     from_replay: bool = False
     hint: Reason | None = None              # e.g. "no click seen with Z, X: other buttons?" (offer the key card)
     map_changed: bool = False               # this round was played on another map than the previous one
+    pointer: tuple[Reason, ...] = ()        # replay calibration / cursor trust, as short factual lines
 
 
 @dataclass(frozen=True)
@@ -217,7 +221,7 @@ def rounds_text(summary: RoundsSummary, translate: Translate = default_t) -> str
     return "\n".join(out)
 
 
-ROUND_KINDS = ("start", "shift", "scale", "probe", "filter", "manual", "smoothing", "revert")
+ROUND_KINDS = ("start", "shift", "scale", "rotate", "probe", "filter", "manual", "smoothing", "revert")
 
 
 @dataclass(frozen=True)
@@ -296,7 +300,8 @@ class CoachCore:
                  policy: adapt.TuningPolicy | None = None, catalog: Mapping[str, FilterSpec] | None = None,
                  aspect_lock: bool = True, allow_filters: bool = True, keys: Sequence[str] = DEFAULT_CLICK_KEYS,
                  analysis_detail: str = DEFAULT_DETAIL, analyze: Callable[..., PlayReport] = analyze_play,
-                 clock: Callable[[], float] = time.monotonic) -> None:
+                 clock: Callable[[], float] = time.monotonic, preroll: bool | None = None,
+                 map_finder: MapFinder | None = None) -> None:
         self.tuner, self.tablet, self.display = tuner, tablet, display
         self.keys: tuple[str, ...] = normalize_keys(keys, default=())
         self.analysis_detail = analysis_detail
@@ -313,8 +318,13 @@ class CoachCore:
         self.beatmap: Beatmap | None = None
         self._manual_map = False
         self._last_title: str | None = None
-        self._index: BeatmapIndex | None = None
-        self._index_scanned_for: str | None = None
+        # Map recognition and pointer checks (engine.mapindex / engine.calibrate, playwatch's pre-roll).
+        self._maps = map_finder if map_finder is not None else MapFinder(cache_path)
+        self._map_gen = -1                    # finder generation of the last lookup (a pending index may learn more)
+        self._preroll = (recorder_factory is None) if preroll is None else preroll
+        self._armed: PlayRecorder | None = None   # pre-roll recorder while a map title is shown before "Start"
+        self._title_at: float | None = None   # recorder clock when the title last named a map
+        self._watching: tuple[float, str] | None = None   # a spectate/replay/editor title seen while observing
         self.live_report: PlayReport | None = None
         self.result: RoundResult | None = None
         self._pending: _Pending | None = None
@@ -327,6 +337,14 @@ class CoachCore:
         self._original_filters: tuple[FilterConfig, ...] = original.filters
         self.trials: dict[str, SmoothTrial] = {}
         self._touched: set[str] = set()       # smoothing filters the player switched on or off here
+        # The player's habits (engine.habits / habitstore / rulebook). In memory only unless the window hands over
+        # a store with a file (``use_habit_store``); the session id only groups this session's plays.
+        self.habit_store = habitstore.HabitStore(None)
+        self.session_id = habitstore.new_session_id()
+        self.habit_profile: habits_mod.HabitProfile | None = None
+        self.suggestions: tuple[rulebook.Suggestion, ...] = ()
+        self.style: rulebook.StyleSummary | None = None
+        self._habit_mods: habits_mod.ModInfo | None = None
 
     def _original_profile(self):
         for prof in settings_io.list_profiles(self.tuner.original):
@@ -336,7 +354,8 @@ class CoachCore:
 
     # --------------------------------------------------------------- prepare
     def _default_recorder(self, area: Rect) -> PlayRecorder:
-        return PlayRecorder(PenSampler(poll_hz=1500.0), self.display, area, self.keys, tablet=self.tablet)
+        return PlayRecorder(PenSampler(poll_hz=1500.0), self.display, area, self.keys, tablet=self.tablet,
+                            playfield_source=lambda: osu_playfield_box(getattr(self.watcher.process, "pid", None)))
 
     def set_keys(self, keys: Sequence[str]) -> bool:
         """Use these click keys from the next round on (the recorder is rebuilt with them). False while observing."""
@@ -407,7 +426,7 @@ class CoachCore:
         if osu is not None and self.beatmap is None and parse_window_title(title) is None:
             issues.append(Reason("play.prep.no_map_title"))
         elif osu is not None and self.beatmap is None:
-            issues.append(Reason("play.prep.map_not_found"))
+            issues.append(Reason("play.prep.map_indexing") if self._maps.pending else Reason("play.prep.map_not_found"))
         keys_ok = self.recorder.keys_available if self.recorder is not None else self._keys_readable()
         if not self.keys:
             issues.append(Reason("play.prep.no_keys"))
@@ -422,18 +441,21 @@ class CoachCore:
         """Poll osu!'s window title (cheap) and switch to the map it names. True when the map just changed.
 
         osu! only shows the map in the title while it is being played, so a menu title ("osu!") says nothing
-        and the current map is kept; the next title that names a map is looked up again. Call it every second or so
+        and the current map is kept; the next title that names a map is looked up again. Call it ~10 times a second
         in every phase: the map is often only known once the play has started, and a stale one would make the
-        whole round be judged against the previous map.
+        whole round be judged against the previous map. An unchanged title costs one window enumeration; a new
+        one an index lookup (``engine.mapindex``). Spectate / editor titles keep the current map.
         """
         osu = self.watcher.process
         if osu is None:
             return False
         title = self._title_source()
-        if title == self._last_title:
+        if title == self._last_title and not self._map_retry_due(title):
             return False
-        self._last_title = title
-        if parse_window_title(title) is None:
+        if title != self._last_title:
+            self._last_title = title
+            self._map_title_seen(title)
+        if parse_window_title(title) is None or title_kind(title) != "play":    # spectating / editor: keep the map
             return False
         before = self.beatmap.path if self.beatmap is not None else None
         self.beatmap, self._manual_map = None, False
@@ -450,17 +472,41 @@ class CoachCore:
         return bool(self.keys) and windows_key_source(self.keys) is not None
 
     def _find_map(self, title: str | None, exe: str | None) -> None:
-        info = parse_window_title(title)
-        songs = songs_dir_for(exe)
-        if info is None or songs is None:
-            return
-        if self._index is None or self._index.songs_dir != songs:
-            self._index = BeatmapIndex(songs, self.cache_path)
-            self._index_scanned_for = None
-        if self._index_scanned_for != title:   # rescan once per title (new maps appear while osu! runs)
-            self._index.scan()
-            self._index_scanned_for = title
-        self.beatmap = find_beatmap(info, self._index)
+        osu = self.watcher.process
+        self.beatmap = self._maps.find(title, exe, osu.flavor if osu is not None else None)   # O(1) when indexed
+        self._map_gen = self._maps.generation
+
+    # ---------------------------------------------- map title -> recording (pre-roll, retroactive start)
+    def _map_retry_due(self, title: str | None) -> bool:
+        """The title still names a map that was not found, and the index learned something since the last try."""
+        return self.beatmap is None and self._maps.generation != self._map_gen and parse_window_title(title) is not None
+
+    def _map_title_seen(self, title: str | None) -> None:
+        """A new title. While observing, a play title starts the capture there (the ring buffer reaches back);
+        a spectate/replay/editor title only counts once keys are pressed (decided in :meth:`finish`). Before
+        "Start", a play title arms a pre-roll so a late start still gets the beginning of the play."""
+        kind = title_kind(title)
+        rec = self.recorder
+        if self.phase == "observe" and rec is not None and hasattr(rec, "begin_at"):
+            at = rec.now() - TITLE_LEAD_S
+            if kind == "play":
+                rec.begin_at(at)
+                self._watching = None
+            elif kind in ("watch", "edit"):
+                self._watching = (at, kind)
+        elif self.phase != "observe" and self._preroll:
+            if kind == "play":
+                if self._armed is None:
+                    armed = self._recorder_factory(self.area)
+                    self._armed = armed if getattr(armed, "arm", None) and armed.arm() else None
+                self._title_at = self._armed.now() if self._armed is not None else None
+            else:
+                self._disarm()
+
+    def _disarm(self) -> None:
+        armed, self._armed, self._title_at = self._armed, None, None
+        if armed is not None:
+            armed.disarm()
 
     def set_beatmap_file(self, path: str | Path) -> bool:
         """The player chose a ``.osu`` by hand. False when it cannot be read."""
@@ -475,8 +521,17 @@ class CoachCore:
         """Begin recording. False when there is no map yet."""
         if self.beatmap is None or not self.keys:
             return False
-        self.recorder = self._recorder_factory(self.area)
-        self.recorder.start()
+        armed, since = self._armed, self._title_at
+        self._armed, self._title_at, self._watching = None, None, None
+        if armed is not None and armed.armed and tuple(armed.keys) == tuple(self.keys):
+            armed.area = self.area                         # the pre-roll becomes the capture (retroactive start)
+            self.recorder = armed
+            armed.start(since=None if since is None else since - TITLE_LEAD_S)
+        else:
+            if armed is not None:
+                armed.disarm()
+            self.recorder = self._recorder_factory(self.area)
+            self.recorder.start()
         self.live_report = None
         self.phase = "observe"
         return True
@@ -506,12 +561,30 @@ class CoachCore:
         """Stop recording, score the round and prepare the ONE proposal."""
         if self.recorder is None or self.beatmap is None:
             return None
+        watching, self._watching = self._watching, None
+        if watching is not None and self.recorder.presses_since(watching[0]):   # played after all: start there
+            self.recorder.begin_at(watching[0])
+            watching = None
         self.recorder.stop()
         capture = self.recorder.snapshot()
         hint = None
         if len(capture.clicks) < 3 and _travel(capture) >= NO_CLICKS_TRAVEL_SCREENS * max(self.display.height_px, 1):
             hint = self._keys_hint()
-        return self._complete_round(capture, hint=hint)
+        result = self._complete_round(capture, hint=hint)
+        notes = (Reason("play.map.watching"),) if watching is not None else ()
+        self.result = replace(result, pointer=notes + self._pointer_check(capture))
+        return self.result
+
+    def _pointer_check(self, capture: PlayCapture) -> tuple[Reason, ...]:
+        """Replay calibration and cursor trust after a live play (``engine.calibrate``); settings are never changed."""
+        osu = self.watcher.process
+        lazer = osu is not None and osu.flavor == "lazer"
+        root = Path(osu.path).parent if osu is not None and osu.path and not lazer else None
+        now = getattr(self.recorder, "now", None)
+        return calibrate_mod.check_play(
+            capture, self.beatmap, osu_dir=root, recorder_now=now() if now else None, finder=self._maps,
+            lazer_files=self._maps.lazer_files if lazer else None, cfg=osucfg.load_cfg(root) if root else None,
+            stats=getattr(self.recorder, "sampler_stats", None), refresh_hz=self.display.refresh_hz).notes
 
     def abort(self) -> None:
         """Stop observing without making a round of it (e.g. to change the click keys)."""
@@ -535,8 +608,9 @@ class CoachCore:
         if pending is not None and not record.accepted:
             self._pending = pending           # nothing could be measured: the next round still tells its effect
         self._note_smoothing_round(record, profile.filters)
+        rules = self._learn_habits(capture, report, record, profile, from_replay)
         proposal = opt.propose(self.state, profile, report, self.tablet, self.policy, self.aspect_lock,
-                               self.allow_filters, self.catalog)
+                               self.allow_filters, self.catalog, rules)
         convergence = opt.convergence(self.state)
         if proposal.kind == "none" and proposal.verdict == opt.PLATEAU:
             convergence = Convergence(opt.PLATEAU, proposal.message or convergence.message,
@@ -575,6 +649,7 @@ class CoachCore:
         if replay is None:
             return ReplayOutcome(False, Reason("play.replay.unreadable"))
         same = replay_mod.matches_beatmap(replay, self.beatmap)
+        self._habit_mods = habits_mod.ModInfo.from_replay(replay)     # the replay knows its mods (HR, DT, Relax)
         self._complete_round(replay_mod.replay_to_capture(replay, self.area, self.display, self.tablet),
                              from_replay=True)
         return ReplayOutcome(True, None if same is not False else Reason("play.replay.other_map"), replay, same)
@@ -637,7 +712,10 @@ class CoachCore:
         changes = proposal.changes if proposal else None
         if proposal is None or changes is None:
             return CoachFeedback(False, message=Reason("play.msg.nothing_to_apply"), sound="error")
-        if changes.filters is not None and self._touched:
+        if proposal.rule_filter is not None:      # a rulebook filter change: exactly that one, on what is live now
+            changes = replace(changes, filters=opt.replace_filter(self.profile.filters, *proposal.rule_filter))
+            self._touched.add(proposal.rule_filter[0])
+        elif changes.filters is not None and self._touched:
             changes = replace(changes, filters=self._keep_user_smoothing(changes.filters))
         if not self.aspect_lock and changes.tablet_area is not None and changes.lock_aspect_ratio is None:
             changes = replace(changes, lock_aspect_ratio=False)    # OTD must not snap the area back to the screen's ratio
@@ -673,7 +751,7 @@ class CoachCore:
         """
         proposal = self.result.proposal if self.result else None
         feedback = None
-        if proposal is not None and proposal.kind in ("shift", "scale", "filter"):
+        if proposal is not None and proposal.kind in ("shift", "scale", "rotate", "filter"):
             self.state = opt.mark_undone(self.state, proposal.kind, proposal.move)
         elif proposal is not None and proposal.kind in ("probe", "probe_back"):
             self.state = opt.skip_probe(self.state, proposal.new_probe, back_only=proposal.kind == "probe_back")
@@ -957,6 +1035,63 @@ class CoachCore:
                 out[idx] = live[live_idx]
         return tuple(out)
 
+    # ---------------------------------------------------------------- habits
+    def use_habit_store(self, store: habitstore.HabitStore) -> None:
+        """Keep the player's habits in ``store`` (the window hands over one backed by ``habits.json``)."""
+        self.habit_store = store
+
+    def _habit_setup(self, area: Rect, filters: Sequence[FilterConfig]) -> habitstore.Setup:
+        rate, mm_per_px = self._rate_and_scale()
+        on = rulebook.smoothing_on(filters, self.catalog)
+        return habitstore.Setup.of(area, smoothing.total_delay_ms(on, rate, mm_per_px), (fc.path for fc in on))
+
+    def _ladders(self, filters: Sequence[FilterConfig]) -> dict[str, smoothing.Ladder]:
+        """Less / more smoothing levels of the filters the rulebook may touch (on now, or the lightest one to add)."""
+        paths = {fc.path for fc in rulebook.smoothing_on(filters, self.catalog)} | {rulebook.RADIAL_TABLET}
+        out = {}
+        for path in paths:
+            ladder = self.smoothing_ladder(path)
+            if ladder is not None:
+                out[path] = ladder
+        return out
+
+    def _learn_habits(self, capture: PlayCapture, report: PlayReport, record, profile, from_replay: bool
+                      ) -> tuple[rulebook.Suggestion, ...]:
+        """Measure this play's habits, keep them, and ask the rulebook what an experienced player would change.
+
+        Never breaks a round: anything unexpected means "no habits this time" (the other stages still run).
+        """
+        mods, self._habit_mods = self._habit_mods, None
+        try:
+            prof = habits_mod.analyze_habits(self.beatmap, capture, report, mods, from_replay)
+            setup = self._habit_setup(profile.tablet_area, profile.filters)
+            adaptation = self.habit_store.adaptation(setup, self.session_id)
+            if record.accepted and prof.usable:
+                self.habit_store.add(prof, setup, self.session_id)
+                self.habit_store.save()             # a failed save only means this play is not remembered
+            r_now = prof.r_mm or report.radius_mm or 0.0
+            view = self.habit_store.view(setup, r_now, "long", self.session_id)
+            rate, mm_per_px = self._rate_and_scale()
+            ctx = rulebook.Context(profile.tablet_area, tuple(profile.filters), self.tablet, self.aspect_lock,
+                                   self.catalog, frozenset(self.installed_filters()), self._ladders(profile.filters),
+                                   rate, mm_per_px, adaptation, len(prof.spike_times),
+                                   self.habit_store.view(setup, r_now, "session", self.session_id),
+                                   frozenset(self._touched) | frozenset(self.trials))
+            self.suggestions = tuple(rulebook.suggest(view, ctx))
+            self.style = rulebook.describe(view, self.suggestions)
+            self.habit_profile = prof
+        except Exception:
+            self.habit_profile, self.suggestions, self.style = None, (), None
+        return self.suggestions
+
+    def forget_habits(self) -> CoachFeedback:
+        """"Olvidar mis hábitos": every stored play of this player is deleted (the file too)."""
+        ok = self.habit_store.forget()
+        self.suggestions, self.habit_profile = (), None
+        self.style = rulebook.describe(habitstore.HabitView(), ())
+        return CoachFeedback(ok, (), Reason("play.style.forgotten" if ok else "play.style.forget_failed"),
+                             "undo" if ok else "error")
+
     def keep(self) -> CoachFeedback:
         """Write the live settings to settings.json (after the backup). Returns the outcome."""
         result = self.tuner.keep()
@@ -981,5 +1116,7 @@ class CoachCore:
     def stop_recording(self) -> None:
         if self.recorder is not None:
             self.recorder.stop()
+        self._disarm()
+        self._maps.close()
 
 

@@ -103,6 +103,7 @@ class _Reader:
 
 
 def _frames(raw: bytes) -> tuple[ReplayFrame, ...]:
+    # The stream is the legacy "LZMA alone" layout (properties + 8-byte size); FORMAT_AUTO reads it.
     text = lzma.decompress(raw).decode("ascii", errors="ignore")
     frames, t = [], 0.0
     for chunk in text.split(","):
@@ -113,9 +114,11 @@ def _frames(raw: bytes) -> tuple[ReplayFrame, ...]:
             w, x, y, z = int(float(parts[0])), float(parts[1]), float(parts[2]), int(float(parts[3]))
         except ValueError:
             continue
-        if w == -12345:                           # the random-seed pseudo frame at the end
+        if w == -12345:                           # the random-seed pseudo frame (lazer: a 0 terminator)
             continue
         t += w
+        if x == 256.0 and y == -500.0:            # stable's leading placeholder frames: no cursor position
+            continue
         if math.isfinite(x) and math.isfinite(y) and len(frames) < MAX_FRAMES:
             frames.append(ReplayFrame(t, x, y, z))
     return tuple(frames)

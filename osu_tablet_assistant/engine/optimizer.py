@@ -15,6 +15,12 @@ One round = the player plays a map, ``playobserve`` produces a ``PlayReport``,
 4. **filters**, only through ``adapt.step`` so the plugin policy and the safety limits of the
    companion mode apply: lag on fast jumps -> "more responsive", jitter on slow parts -> "steadier
    at rest", both -> nothing (ambiguous);
+0. **rulebook** (``engine.rulebook``, when the caller passes ``rules``): the player's habits pooled over plays
+   (``engine.habits`` / ``engine.habitstore``) turned into ONE explained change by the community's rules
+   (shift / size / one axis / rotation / lighter or one-only smoothing / the lightest anti-jitter filter). It goes
+   right after "back to the best round" and the stop rule, because its evidence spans several plays; a blocking
+   rule (interference, adaptation window) means no change at all. Without significant, repeated habits it
+   proposes nothing and the stages below run as before;
 5. **area probe** (a *trial*), only when none of the above has evidence: the point estimates (reach gains,
    bias, edge zones that fall short / go over) choose a small, clearly labelled trial move of the area (at
    most ``PROBE_MAX_SHIFT_MM`` / ``PROBE_MAX_SCALE``). The next round measures it: kept when the cost
@@ -95,7 +101,7 @@ PROBE_ATTEMPTS = ((1, 1.0), (-1, 1.0), (1, 0.5), (-1, 0.5))
 _X_ZONES = frozenset(("left", "right", "top_left", "top_right", "bottom_left", "bottom_right"))
 _Y_ZONES = frozenset(("top", "bottom", "top_left", "top_right", "bottom_left", "bottom_right"))
 # Changes after which the trials start over from a fresh estimate (their budgets stay used).
-_PROBE_RESET_KINDS = ("shift", "scale", "filter", "revert", "manual", "smoothing")
+_PROBE_RESET_KINDS = ("shift", "scale", "rotate", "filter", "revert", "manual", "smoothing")
 
 
 # ------------------------------------------------------------------- cost
@@ -281,7 +287,7 @@ def record_round(state: OptimizerState, report: PlayReport, area: Rect, filters:
                       accepted, math.hypot(*move), kind)
     previous = accepted_rounds(state)
     trust, undone, last_move = state.trust, state.undone, state.last_move
-    if accepted and kind in ("shift", "scale", "filter") and previous:
+    if accepted and kind in ("shift", "scale", "rotate", "filter") and previous:
         before = previous[-1]
         if rec.cost > before.cost + max(_noise(rec), _noise(before), MIN_ABSOLUTE_WORSE):
             trust = max(MIN_TRUST, trust / 2.0)
@@ -372,7 +378,10 @@ def convergence(state: OptimizerState) -> Convergence:
 # ---------------------------------------------------------------- proposal
 @dataclass(frozen=True)
 class RoundProposal:
-    """What to do next. ``kind`` is shift | scale | filter | revert | probe | probe_back | none.
+    """What to do next. ``kind`` is shift | scale | rotate | filter | revert | probe | probe_back | none.
+
+    ``rule`` / ``sources``: the rulebook rule (and the research sources) behind a rule-based proposal;
+    ``rule_filter`` is its one filter change (path, new store or None to take it out), to apply on what is live.
 
     ``probe`` is an area trial (``new_probe`` carries the trial state to hand back to ``record_round``);
     ``probe_back`` puts a trial that did not help back. ``probe_outcome`` says, in words, what happened to the
@@ -392,6 +401,9 @@ class RoundProposal:
     new_probe: ProbeState | None = None
     probe_outcome: Reason | None = None
     undo_area: Rect | None = None
+    rule: int | None = None
+    sources: tuple[str, ...] = ()
+    rule_filter: tuple[str, FilterConfig | None] | None = None
 
     @property
     def changes(self) -> ProfileChanges | None:
@@ -694,11 +706,12 @@ def _after_failed_probe(state: OptimizerState, ps: ProbeState, verdict: str, tab
 
 def propose(state: OptimizerState, profile: ProfileInfo, report: PlayReport, tablet: TabletSpec | None = None,
             policy: adapt.TuningPolicy | None = None, aspect_lock: bool = True, allow_filters: bool = True,
-            catalog: Mapping[str, FilterSpec] | None = None) -> RoundProposal:
+            catalog: Mapping[str, FilterSpec] | None = None, rules: Sequence[Any] = ()) -> RoundProposal:
     """ONE change for the next round, or none. ``state`` must already contain the round of ``report``.
 
     ``profile`` carries the area and filters that were live during that round. With too little data
     nothing changes (verdict ``insufficient``); when the stop rule holds the verdict is ``plateau``.
+    ``rules`` are ``rulebook.Suggestion`` s for the player's habits (stage 0 of the module docstring).
     """
     if not state.rounds or not state.rounds[-1].accepted or not report.trusted:
         return _none(INSUFFICIENT, Reason("play.msg.play_more"), report.warnings)
@@ -710,14 +723,20 @@ def propose(state: OptimizerState, profile: ProfileInfo, report: PlayReport, tab
         if ps.outcome == "reverted":
             return _after_failed_probe(state, ps, verdict.verdict, tablet, aspect_lock)
         outcome = _probe_outcome(ps)
-    proposal = _propose(state, profile, report, tablet, policy, aspect_lock, allow_filters, catalog, verdict)
+    proposal = _propose(state, profile, report, tablet, policy, aspect_lock, allow_filters, catalog, verdict, rules)
     return replace(proposal, probe_outcome=outcome) if outcome is not None else proposal
 
 
 def _propose(state: OptimizerState, profile: ProfileInfo, report: PlayReport, tablet: TabletSpec | None,
              policy: adapt.TuningPolicy | None, aspect_lock: bool, allow_filters: bool,
-             catalog: Mapping[str, FilterSpec] | None, verdict: Convergence) -> RoundProposal:
+             catalog: Mapping[str, FilterSpec] | None, verdict: Convergence, rules: Sequence[Any] = ()
+             ) -> RoundProposal:
     last = state.rounds[-1]
+    blocking = next((s for s in rules if s.blocks), None)
+    if blocking is not None:                 # interference / adaptation window: tune nothing on this play
+        return RoundProposal("none", verdict.verdict if verdict.verdict != START else IMPROVING,
+                             Reason(f"play.rule.msg.{blocking.action}"), (blocking.reason,), rule=blocking.rule,
+                             sources=tuple(blocking.sources))
     if state.best is not None and state.best != last.index and last.kind not in ("revert", "probe_back"):
         best = state.rounds[state.best]
         if last.cost > best.cost + max(_noise(last), _noise(best), MIN_ABSOLUTE_WORSE):
@@ -726,6 +745,9 @@ def _propose(state: OptimizerState, profile: ProfileInfo, report: PlayReport, ta
                                  area=best.area, filters=best.filters, revert_to=best.index)
     if verdict.verdict == PLATEAU:
         return _none(PLATEAU, verdict.message)
+    ruled = _rule_stage(state, profile, tablet, aspect_lock, rules)
+    if ruled is not None:
+        return replace(ruled, verdict=verdict.verdict if verdict.verdict != START else IMPROVING)
     catalog = catalog if catalog is not None else load_catalog()
     for make in (lambda: _shift(state, profile, report, tablet),
                  lambda: _scale(state, profile, report, tablet, aspect_lock),
@@ -736,3 +758,82 @@ def _propose(state: OptimizerState, profile: ProfileInfo, report: PlayReport, ta
         if proposal is not None:
             return replace(proposal, verdict=verdict.verdict if verdict.verdict != START else IMPROVING)
     return _practice(report) or _none(PLATEAU, Reason("play.conv.nothing_left"))
+
+
+# ------------------------------------------------------------- rulebook proposals
+def _rule_stage(state: OptimizerState, profile: ProfileInfo, tablet: TabletSpec | None, aspect_lock: bool,
+                rules: Sequence[Any]) -> RoundProposal | None:
+    """The first rulebook change that can be applied and was not just undone (one change per round)."""
+    for suggestion in rules:
+        if suggestion.is_change:
+            proposal = rule_proposal(state, profile, suggestion, tablet, aspect_lock)
+            if proposal is not None:
+                return proposal
+    return None
+
+
+def rule_proposal(state: OptimizerState, profile: ProfileInfo, suggestion: Any, tablet: TabletSpec | None,
+                  aspect_lock: bool = True) -> RoundProposal | None:
+    """A ``rulebook.Suggestion`` as a proposal: the rule's step (already within the research caps) times the trust
+    region, bounded to the tablet, never a movement that was just undone. None when nothing would move."""
+    area = profile.tablet_area
+    lead = (suggestion.reason,)
+    extra = dict(rule=suggestion.rule, sources=tuple(suggestion.sources))
+    message = Reason(f"play.rule.msg.{suggestion.action}")
+    action = suggestion.action
+    if action == "area_shift":
+        dx, dy = suggestion.dx * state.trust, suggestion.dy * state.trust
+        if math.hypot(dx, dy) < 0.25 or _repeats(state, "shift", dx, dy):
+            return None
+        new, reasons = areafit.shift_area(area, dx, dy, tablet)
+        if new == area:
+            return None
+        mx, my = areafit.tablet_to_view(new.x - area.x, new.y - area.y, area.rotation)
+        return RoundProposal("shift", IMPROVING, message, lead + tuple(reasons), area=new, move=(mx, my), **extra)
+    if action == "area_size":
+        if suggestion.axis != "both" and aspect_lock:
+            return None
+        f = 1.0 + suggestion.sign * suggestion.step * max(state.trust, 0.5)
+        fx, fy = {"both": (f, f), "x": (f, 1.0), "y": (1.0, f)}[suggestion.axis]
+        if _repeats(state, "scale", fx - 1.0, fy - 1.0):
+            return None
+        new, reasons = areafit.scale_area_axes(area, fx, fy, tablet, lock_aspect=suggestion.axis == "both")
+        if new == area:
+            return None
+        rel = (new.width / area.width - 1.0, new.height / area.height - 1.0)
+        return RoundProposal("scale", IMPROVING, message, lead + tuple(reasons), area=new, move=rel, **extra)
+    if action == "area_rotate":
+        deg = suggestion.sign * suggestion.step
+        if _repeats(state, "rotate", deg, 0.0):
+            return None
+        new, reasons = areafit.rotate_area(area, deg, tablet)
+        if new == area:
+            return None
+        return RoundProposal("rotate", IMPROVING, message, lead + tuple(reasons), area=new, move=(deg, 0.0), **extra)
+    if suggestion.filter_change is not None:
+        path, store = suggestion.filter_change
+        more = action == "smoothing_add_light"
+        if ("filter", 1 if more else -1, 0) in state.undone:
+            return None
+        filters = replace_filter(profile.filters, path, store)
+        if filters == tuple(profile.filters):
+            return None
+        return RoundProposal("filter", IMPROVING, message, lead, filters=filters, move=(1.0 if more else -1.0, 0.0),
+                             rule_filter=suggestion.filter_change, **extra)
+    return None
+
+
+def replace_filter(filters: Sequence[FilterConfig], path: str, store: FilterConfig | None
+                   ) -> tuple[FilterConfig, ...]:
+    """``filters`` with the store of ``path`` replaced (inserted at its chain position when missing; removed when
+    ``store`` is None)."""
+    out = list(filters)
+    idx = next((i for i, fc in enumerate(out) if fc.path == path), None)
+    if store is None:
+        if idx is not None:
+            del out[idx]
+        return tuple(out)
+    if idx is None:
+        return tuple(adapt.insert_in_chain(out, store))
+    out[idx] = store
+    return tuple(out)

@@ -735,7 +735,9 @@ class DataLedgerTests(unittest.TestCase):
         # the recorder only knows the configured keys (default Z and X: the pen tip is not a click unless the
         # player says so), the replay keeps no identity, the profile no play data
         self.assertEqual(playwatch.DEFAULT_CLICK_KEYS, ("z", "x"))
-        self.assertEqual(set(coach.DATA_LEDGER), {"cursor", "keys", "window", "map", "replay", "profile", "never"})
+        # 0.9.0: the player's habits (summary numbers in habits.json, "Olvidar mis hábitos") are listed too
+        self.assertEqual(set(coach.DATA_LEDGER),
+                         {"cursor", "keys", "window", "map", "replay", "profile", "habits", "never"})
 
 
 class ClickKeyTests(unittest.TestCase):

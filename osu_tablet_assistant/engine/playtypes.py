@@ -99,6 +99,18 @@ class ClickEvent:
 
 
 @dataclass(frozen=True)
+class PlayfieldBox:
+    """Where the playfield is on the desktop: osu! pixel (0, 0) at ``(left, top)``, ``scale`` desktop px each.
+
+    Measured from osu!'s own client rectangle (``gui.pen_sampler.osu_playfield_box``) when that is
+    available; without one the display is assumed to hold the game full screen (``engine.beatmap``).
+    """
+    left: float
+    top: float
+    scale: float
+
+
+@dataclass(frozen=True)
 class PlayCapture:
     """What the recorder saw: cursor samples, click times, and the setup they were taken under."""
     samples: tuple[PenSample, ...]
@@ -108,6 +120,7 @@ class PlayCapture:
     tablet: TabletSpec | None = None
     started_at: float = 0.0
     ended_at: float | None = None
+    playfield: PlayfieldBox | None = None    # measured from osu!'s window; None = full screen on ``display``
 
 
 # ------------------------------------------------------------------- analysis

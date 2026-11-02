@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 from ..engine import areafit
 from ..engine.beatmap import playfield_to_desktop
-from ..engine.playtypes import HIT, NO_CLICK, TOO_FAR, ObjectResult
+from ..engine.playtypes import HIT, NO_CLICK, TOO_FAR, ObjectResult, PlayfieldBox
 from ..models import DisplaySpec, Rect, TabletSpec
 from .palette import COLORS
 
@@ -69,12 +69,14 @@ class MapGeometry:
         return x0, y0, x1, y1
 
 
-def playfield_uv(display: DisplaySpec) -> tuple[float, float, float, float]:
-    """The playfield's extent in normalized area coordinates: ``(u_left, v_top, u_right, v_bottom)``."""
+def playfield_uv(display: DisplaySpec, box: PlayfieldBox | None = None) -> tuple[float, float, float, float]:
+    """The playfield's extent in normalized area coordinates: ``(u_left, v_top, u_right, v_bottom)``.
+
+    ``box`` is the playfield measured from osu!'s window (windowed play); None assumes full screen."""
     left = display.offset_x - display.width_px / 2
     top = display.offset_y - display.height_px / 2
-    x0, y0 = playfield_to_desktop(0, 0, display)
-    x1, y1 = playfield_to_desktop(512, 384, display)
+    x0, y0 = playfield_to_desktop(0, 0, display, box)
+    x1, y1 = playfield_to_desktop(512, 384, display, box)
     return ((x0 - left) / display.width_px, (y0 - top) / display.height_px,
             (x1 - left) / display.width_px, (y1 - top) / display.height_px)
 

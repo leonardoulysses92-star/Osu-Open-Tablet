@@ -5,6 +5,7 @@ lag, jitter and timing noise, so tests can check what the analysis recovers.
 """
 from __future__ import annotations
 
+import math
 import random
 from dataclasses import dataclass
 
@@ -34,6 +35,11 @@ class Player:
     hz: float = 1000.0
     patch: tuple[float, float, float, float] | None = None   # (fx0, fy0, fx1, fy1) playfield region ...
     patch_short_mm: float = 0.0     # ... where the cursor stops this many mm short (towards the centre)
+    rotation_deg: float = 0.0       # the landing is rotated about the screen centre (+ = clockwise on screen)
+    overshoot: float = 0.0          # the landing goes past the target by this fraction of the jump ...
+    edge_stop_mm: float = 0.0       # ... plus this many mm along the jump (negative = stops before the centre)
+    spikes: int = 0                 # EMI-like out-and-back teleports injected into the cursor stream
+    spike_mm: float = 30.0
 
 
 def player_for(area: Rect, ideal: Rect, **kw) -> Player:
@@ -72,10 +78,22 @@ def simulate(beatmap: Beatmap, player: Player, seed: int = 0, t0: float | None =
     t0 = rng.uniform(5.0, 400.0) if t0 is None else t0
     objs = beatmap.judged_objects
     when, aims, clicks = [], [], []
+    rot_c, rot_s = math.cos(math.radians(player.rotation_deg)), math.sin(math.radians(player.rotation_deg))
+    prev_target = None
     for o in objs:
         ox, oy = playfield_to_desktop(o.x, 384.0 - o.y if player.hr else o.y, display)
         ax = cx + player.gain_x * (ox - cx) + player.bias_x_mm / mm_x
         ay = cy + player.gain_y * (oy - cy) + player.bias_y_mm / mm_y
+        if player.rotation_deg:
+            rx, ry = (ax - cx) * mm_x, (ay - cy) * mm_y
+            ax, ay = cx + (rx * rot_c - ry * rot_s) / mm_x, cy + (rx * rot_s + ry * rot_c) / mm_y
+        if prev_target is not None and (player.overshoot or player.edge_stop_mm):
+            jx, jy = (ox - prev_target[0]) * mm_x, (oy - prev_target[1]) * mm_y
+            dist = math.hypot(jx, jy)
+            if dist > 1e-6:
+                ax += (player.overshoot * jx + player.edge_stop_mm * jx / dist) / mm_x
+                ay += (player.overshoot * jy + player.edge_stop_mm * jy / dist) / mm_y
+        prev_target = (ox, oy)
         ax += rng.gauss(0, player.aim_noise_mm / mm_x)
         ay += rng.gauss(0, player.aim_noise_mm / mm_y)
         if player.patch is not None:
@@ -116,4 +134,11 @@ def simulate(beatmap: Beatmap, player: Player, seed: int = 0, t0: float | None =
             y = aims[k][1] + f * (aims[nxt][1] - aims[k][1])
         samples.append(PenSample(t, x + rng.gauss(0, player.jitter_px), y + rng.gauss(0, player.jitter_px)))
         t += step
+    if player.spikes:                     # a few samples thrown far away and straight back (interference)
+        srng = random.Random(seed + 7919)
+        for _ in range(player.spikes):
+            k = srng.randrange(len(samples) // 10, len(samples) - 10)
+            for j in range(k, k + 3):
+                s = samples[j]
+                samples[j] = PenSample(s.t, s.x + player.spike_mm / mm_x, s.y - player.spike_mm / mm_y)
     return PlayCapture(tuple(samples), tuple(clicks), area, display, TABLET, samples[0].t, None if stop_after_s else end)

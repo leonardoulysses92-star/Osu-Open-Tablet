@@ -63,8 +63,9 @@ Only key **names** and press times are kept, in memory, never logged elsewhere.
 ## Seeing the real game: replays (`.osr`)
 
 The only way to see what osu! itself recorded, without touching its memory, is the replay file it writes after
-a play. `engine/replay.py` reads it **only when the player picks it** ("Use a replay (.osr)" on the prepare
-screen, "Check with the replay" on the report):
+a play. `engine/replay.py` reads the one the player picks ("Use a replay (.osr)" on the prepare screen, "Check
+with the replay" on the report) and, after a live round, the newest one osu! wrote since the play started, only
+to check the cursor and the map (see "Map recognition and pointer accuracy"):
 
 * **As a round**: positions and clicks are exact (no key polling, no screen-transform guess for timing), so the
   round is as good as the data can be. It also works where the click keys cannot be read.
@@ -89,6 +90,7 @@ The same list is shown in the app (prepare screen and Settings):
 | The `.osu` of the map | know where the circles are | not copied |
 | A replay, only if you pick it: positions, clicks, mods, hit counts | exact data | memory; name, score, hash and date are discarded |
 | Your tablet, screen, answers and last saved settings | not repeat the procedure | `profile.json` on this PC, deletable in Settings |
+| Your playing habits, as summary numbers only (value, error, count per habit; the area and smoothing they were measured on; date; a random session id) | adapt the setup to the way you play | `habits.json` on this PC, deleted with "Olvidar mis hábitos" |
 
 Never: osu!'s memory, other keys, other windows, your name or score, anything over the internet.
 
@@ -121,6 +123,9 @@ horizontally, playfield offset (64, 48). It is an approximation; the alignment q
 gui.playwatch.PlayRecorder  -> PlayCapture   samples + clicks + area + display
 engine.beatmap              -> Beatmap       parse .osu, find it by window title
 engine.playobserve          -> PlayReport    align, judge, grid, reach, edges, feel
+engine.habits               -> HabitProfile  the player's habits in this play (value, SE, n, confidence)
+engine.habitstore           -> HabitView     pooled over plays (habits.json on this PC), carried to this setup
+engine.rulebook             -> Suggestion    the 18 community rules: one explained change, or "keep"
 engine.optimizer            -> RoundProposal area / filter change + plain-language reasons
 otd.livetune.LiveTuner      applied live, undoable; Keep writes settings.json (after a backup)
 gui.coach / gui.coachcore   the rounds loop (live tablet map, report, history, stop rule)
@@ -288,13 +293,80 @@ leave them alone ("tune only what is enabled") and had nothing to tune. Now:
 Applied changes are **live, not saved**, until "Save these settings" (the usual Keep flow, after a backup).
 The first change makes the backup, like the companion.
 
+## Map recognition and pointer accuracy
+
+Everything below reads FILES or window geometry only; osu!'s memory is never read and no tablet setting is
+changed by it.
+
+* **Map index** (`engine/osudb.py`, `engine/mapindex.py`). osu!stable's `osu!.db` is parsed once (all format
+  generations: byte vs single AR/CS/HP/OD before/after 20140609, the per-entry size before 20191106, Int-Double vs
+  Int-Float star tables before/from 20250107; the star and timing tables are skipped arithmetically) into lookups
+  by the exact `Artist - Title [Version]` (romanised and Unicode), a loose normalised key, and the MD5. It is parsed
+  again (in a background thread) only when its mtime or size changes. A truncated or corrupt file gives what was
+  read and `complete=False`, never an exception. Maps missing from it (imported this session) are found by a
+  **Songs delta**: one `os.scandir`, headers read (with the existing JSON cache) only for folders osu!.db does not
+  list or that changed after it, plus, on a miss, known folders whose name contains the missed song title.
+  Ambiguous titles keep every candidate (`MapFinder.candidates`); the newest is used and the replay MD5 confirms it
+  afterwards. Without `osu!.db` the old full header scan is used. **lazer**: `%APPDATA%/osu/files/*/*/*` (or
+  `storage.ini`'s `FullPath`) is indexed by sniffing `osu file format v` (UTF-8 BOM allowed), with MD5, in a cache
+  keyed by the SHA-256 file name, incrementally in a daemon thread with a progress count.
+* **Title polling** (`gui/playwatch.py`, `gui/coach.py`): the title is read every 100 ms; the osu! process id is
+  cached for 3 s (the process listing is the costly part), so an unchanged title costs one `EnumWindows`. A new
+  title is one dictionary lookup. A title that names a map while osu! seems to spectate, show a replay or the
+  editor (`title_kind`) keeps the current map and only counts once keys are pressed; otherwise the round says so.
+* **Pre-roll** (`PlayRecorder.arm` / `start(since=...)` / `begin_at`): while osu!'s title names a map before
+  "Start", the recorder keeps the last 10 s of cursor and key samples in memory, so a late start begins at the
+  title change. While observing, a new play title starts the capture there.
+* **Sampler back-fill** (`gui/pen_sampler.py`): after a poll gap above 2 ms, `GetMouseMovePointsEx` positions are
+  inserted (negative multi-monitor coordinates fixed up as documented, de-duplicated by `(x, y, time stamp)`;
+  stamps of uncertain resolution are kept inside the gap or spread evenly). `PenSampler.stats` gives polls, the
+  largest gap and the back-filled count; the report mentions them when a gap reached 20 ms or points were filled.
+* **Playfield from osu!'s window**: `GetClientRect` + `ClientToScreen` of osu!'s window give the game area; the
+  640x480 virtual screen is fitted 4:3 inside it (`PlayCapture.playfield`). Without it, full screen on the display
+  is assumed as before.
+* **osu!.<user>.cfg** (`engine/osucfg.py`): only `BeatmapDirectory`, `Fullscreen`, sizes, letterboxing,
+  `RawInput`, `MouseSpeed`, `AbsoluteToOsuWindow`, `FrameSync`/`CustomFrameLimit`, `keyOsuLeft/Right` and
+  `ConfineMouse` are kept (the name and password lines are skipped). `pointer_trust` says "needs_calibration" with
+  raw input plus "map to window" or a sensitivity other than 100 %, or a frame limit under 200 fps.
+* **Replay calibration** (`engine/calibrate.py`, after each live round): the newest `.osr` written since the play
+  started (`Replays/`, `Data/r/`, lazer's store) is lined up with the live recording: clock offset by
+  cross-correlating key-down edges (the replay's speed first, then 1.0 / 1.5 / 0.75), then `p_playfield = A *
+  p_desktop + b` by least squares. The report gets one factual line: "La transformación se confirmó con el
+  replay", "El cursor del juego no coincide con el del sistema: ..." (A not a scaled identity, or a large
+  residual), or the measured shift / size of the playfield; plus whether the replay's MD5 confirms the map.
+  `engine/replay.py` was checked against the format: the LZMA "alone" stream, the `-12345` seed frame and
+  stable's two `(256, -500)` lead frames (now skipped; their time still counts).
+
+**Verified by tests** (synthetic files only; `tests/osubuild.py` writes osu!.db, cfg and .osr bytes):
+`test_osudb.py` (every format generation, boundaries, truncated / corrupt / lying counts, 4000 entries well under
+a second here), `test_mapindex.py` (exact / Unicode / loose / MD5 lookups, ambiguity, reload only on change, the
+delta, background loading, the lazer store and its cache, fallbacks), `test_osucfg.py`, `test_calibrate.py`
+(offset, DT with and without the mod flag, raw-input-like and noisy transforms, a shifted playfield, mirrored HR
+frames, the newest replay in stable and lazer folders, the report lines), `test_pointer_tracking.py` (pid cache,
+title kinds, the ring buffer, back-fill with fine and coarse stamps, the window box, the CoachCore wiring).
+
+**Still needs a real machine** (from the research note's "Unknown / needs testing" list):
+1. Whether the stable gameplay playfield has a vertical offset relative to (64, 48) (the replay fit measures it).
+2. Stable letterboxing: units and range of `LetterboxPositionX/Y` and how they move the playfield.
+3. The `GetMouseMovePointsEx` time stamp resolution, and whether it records SendInput and VMulti / Windows Ink moves.
+4. When stable writes `osu!.db` (on exit only?): watch its mtime during a session that imports a map.
+5. Whether the stable title uses romanised or Unicode metadata, and its exact spacing; the same for lazer.
+6. Whether stable saves an `.osr` in `Data/r` for failed or unranked plays.
+7. Whether lazer's files-store replay is a byte-exact `.osr`, and whether sniffing finds every difficulty.
+8. The HR replay coordinate convention (flipped or not) in stable and lazer.
+9. Real parse time of `osu!.db` and lazer store indexing for 10k+ maps on SSD and HDD.
+10. Real polling jitter of the 1.5 kHz thread while osu! and Tk run.
+11. Whether the window title is set during spectating or replay watching in stable (the `title_kind` words are
+    guesses), and whether osu!'s client rectangle matches the game area in every display mode.
+
 ## Limits (be honest with yourself)
 
 * **Never verified against a real pen and a real osu!** here. The synthetic tests prove the logic recovers
   known offsets, gains and shifts from simulated players; they do not prove the alignment works in a real
   game.
 * The playfield transform is an approximation; **osu!lazer or windowed play may fail** (the coach warns, and
-  the alignment quality tells you). Lazer stores maps differently, so pick the `.osu` by hand there.
+  the alignment quality tells you). For lazer the map comes from its hashed store, indexed the first time in the
+  background (untested with a real lazer install); pick the `.osu` by hand if it is not found.
 * The alignment absorbs your average lateness, so timing errors are relative to your own typical timing.
 * The area is assumed to map onto the whole display.
 * Rotation 90/270 is unverified.
@@ -324,9 +396,122 @@ The first change makes the backup, like the companion.
   user's tablet; the "better / same / worse" line compares two single rounds (possibly on different maps) and
   says nothing about how it feels. That is why the player decides.
 
+## Playing like a coach: habits and rules
+
+The coach now tries to act like an experienced player who sets up your tablet: it learns your **habits** and
+adapts the **setup** to them, so you are comfortable and precise *the way you already play*. It never asks you
+to change your technique; the texts describe ("Sueles quedarte un poco corto en saltos largos hacia la
+derecha") and say what the setup does about it ("por eso el área baja un 3 %").
+
+### What is measured (`engine/habits.py`, pure, no Tk)
+
+From one round: the aligned clicks, the cursor trace (~1.5 kHz live) and the map. Only circles and slider
+heads (never spinners, slider bodies or tails). Every habit has a value, a standard error, a sample count, a
+"significant" flag (`|value| > 2 SE`) and a confidence (low / medium / high). Spatial habits are in **circle
+radii**.
+
+* **One joint fit** of the click errors, `e = a + M·p + c·d̂ + K·j` (weighted least squares; streams weigh 0.3,
+  one pass of outlier removal): `a` = constant aim bias (rule 4), `M` diagonal + `K` = reach gain per axis
+  (`gain_x` / `gain_y`, their mean `size`, their difference `aspect`: rule 1/2 and the data-driven route to a
+  non-16:9 area, rule 5), `(M21 - M12)/2` = **rotation** (rule 6), `c` = a constant "stop at the circle edge"
+  term along the jump that does not grow with distance (rule 2: the area is never changed for it), `K` = the
+  distance-proportional overshoot. In the simulations the fit separates them: an injected 0.06 overshoot comes
+  back as size 0.055 with no edge stop, an injected -0.8 mm edge stop as -0.80 mm with size < 1 %.
+* `long_jump.<dir>` (descriptive), `trail` (along-the-jump error vs jump *speed* at fixed distance: smoothing
+  first, rule 3), `ur`, `key_gap` and, from replays only (their clock is the map's), `timing_bias` (rule 15:
+  the global offset, never the area), `tap_lead` (aim-before-tap vs tap-before-arrive: a style), `jitter`
+  (second-difference, i.e. high-passed, RMS of the still cursor minus a normal 0.05 mm) and `jitter_hover`
+  (breaks vs play: a pen held high, rule 8), `drift_*`, `fatigue` (last vs first third), `edge_clamp.<side>`,
+  `pen_lift`, `spikes` (EMI-like teleports: impossible speeds that come straight back; those samples and the
+  clicks near them are excluded, rule 10) and the hotspots as `zone.<place>`.
+* **Mods**: with a replay HR/DT are known and checked against what the alignment inferred (a mismatch is said);
+  live they were inferred, so no habit goes above "medium". Relax / Autopilot: nothing is measured.
+
+### Pooling (`engine/habitstore.py`)
+
+Plays (rounds and replays of the same player) are combined by **inverse-variance weighting**. Habits that
+depend on the setup are first carried over to the current one (aim bias minus the shift made since, gains times
+the size ratio, rotation minus the rotation added), so a change the coach already made is never counted twice;
+trail and jitter only pool plays with the same smoothing. Two views: this session, and the last 90 days.
+`habits.json` sits next to `config.json`, is versioned, written atomically, a corrupt file is set aside as
+`habits.corrupt.json` (a file from a newer version is left untouched), and **"Olvidar mis hábitos"** deletes it.
+
+A change is only recommended when the habit is **significant** (> 2 SE), **repeated** (the same way, by more
+than its own SE, in at least **2 plays**, with **50+** objects / jumps in total; "high" needs 5 plays, as S20's 5
+replays / 50 jumps), this session does not clearly say the opposite, and it **plausibly costs hits**: a
+systematic error of that size on top of your own scatter misses at least 0.5 % more objects (Rice
+distribution). Otherwise: keep the current setting (rule 16).
+
+### Rules (`engine/rulebook.py`) and how proposals changed
+
+The 18 rules of the research are data (`RULES`, with their S-numbers) and `suggest()` turns the pooled habits
+plus the area, filters and tablet into ordered suggestions, each with a step inside the research caps (about
+**3 %** of size, **≤ 1.5 mm** of shift, **≤ 2°** of rotation per round), a coach-voice reason in Spanish and
+English ("Un jugador con experiencia haría el área un 3 % más grande: ..."), a confidence and its sources.
+
+Order: interference (10) and the **adaptation window** (11: the area changed outside the coach in the last 3
+days, or you left heavy smoothing ≥ 8 ms in the last 10 days: "dale tiempo a tu mano", nothing changes) block
+everything; then smoothing before the area (18: two smoothing filters on → the heavier is switched off; 3: the
+cursor trails on fast jumps with a filter on → one level lighter, or off); the offset before the size (4, then
+13 for one pinned edge); rotation (6); one axis (5, only with the free proportion); size (1/2, never for an
+early tapper: "falling short" is then timing); a bigger area for big shake (9); the hover-height note (8)
+before the lightest Radial Follow (7, ≤ 3 ms, only when no smoothing is on); notes (15 offset, 12 hardware
+smoothing, the edge stop of rule 2); keep (16). Rule 14 (discomfort) needs you to say it and is data only.
+
+In the optimizer the rulebook is **stage 0**, right after "back to the best round" and the stop rule: the first
+rule change that can be applied (not just undone, within the trust region, on the tablet) becomes the
+round's ONE proposal, as a `shift`, `scale`, `rotate` (new kind) or `filter` proposal carrying `rule` and
+`sources`. Without significant, repeated habits it proposes nothing and the old stages (single-round shift /
+size / local / filters / area trials) run exactly as before, so the first round of a fresh player behaves as in
+0.8.x. Filters you switched on or off yourself in the smoothing card stay yours: the rules never touch them.
+
+**Never prediction.** The only filter the rules ever switch on is Radial Follow (tablet space, lightest
+values); lightening only moves down the smoothing ladder, which keeps prediction off. The reason is peppy's
+osu! forum notice of **2026-10-14** (S1): smoothing and anti-jitter plugins are fine, plugins that "assist your
+input" are cheating and detectable, and prediction filters are not named either way.
+
+### The "Tu estilo de juego" card
+
+In the report, after the proposal: a headline, then (open by default when the setup is adapting) "Lo que el
+ajuste hace por ti", "Visto, pero no hace falta cambiar nada" and **"Todavía no seguro"** (low-confidence
+habits, e.g. after one play), a privacy line ("se queda en este PC...") and "Olvidar mis hábitos" (asks first).
+
+### Sources (short; reliability as in the research)
+
+| # | What | Reliability |
+|---|---|---|
+| S1 | peppy, "Important note regarding OpenTabletDriver plugins", 2026-10-14 | official, scope vague |
+| S3, S4 | OTD FAQ (EMI teleports; Windows/osu! settings) | official OTD |
+| S5 | osu! wiki beginner guide (offset via hit-error bar) | official |
+| S6, S8, S9 | forum: comfort / reach / adaptation threads (2014-2020) | forum anecdotes |
+| S11, S12, S18 | forum: prediction usually off; no filter without a reason; days to weeks to adapt | forum |
+| S14, S15, S16, S17, S19 | Hawku FAQ, Devocub, Radial Follow, Reconstructor, Temporal Resampler docs | author docs |
+| S20 | osu-tablet-optimizer (3 % / 2° caps, 5 replays / 50 jumps, edge-bias term) | prior art; README says AI-written |
+| S21 | osu-coach (0.15 r offset threshold, 60 % lean) | hobby tool |
+| S22 | osu-aim-analyzer (overaim → bigger; fix skew first; rotate the same way) | hobby tool |
+| S23, S24 | forum: 4:3 vs 16:9 area ratio | forum, pro numbers second-hand |
+| S26 | AreaCoach (≤ 1.5 mm per map, 3 / 15 ms filter caps) | prior art; README says Claude-written |
+| S28, S29 | forum: pen held high shakes; bigger area hides shake | forum / snippet only |
+| S30 | OTD maintainers: do not stack smoothing | maintainers |
+
+### What is NOT verified (honest list)
+
+* **No top-player or real-player dataset**: setup.moe returned only its title and Reddit could not be fetched,
+  so no rule or threshold was checked against how good players actually set up.
+* **Every threshold is a heuristic, not calibrated on real plays**: 2 SE, 2 plays, 50 samples, 0.5 % miss cost,
+  0.15 r, the 3 % / 1.5 mm / 2° caps (from prior-art tools, two of them AI-written), the stream weight, the spike
+  speeds, the jitter "normal" of 0.05 mm, the adaptation windows (3 / 10 days, from forum anecdotes).
+* Recovery was only tested on **synthetic** plays (`tests/test_habits.py`). The simulated cursor arrives
+  smoothly at each target, so lag-from-smoothing (`trail`) is barely visible there and is tested on synthetic
+  habit values only. Real tremor, hover height and EMI were never measured with a real pen.
+* Whether a rule-based change *feels* better was not tested with a real player.
+
 ## Tests
 
-All synthetic (`tests/playsim.py` simulates a player with a known gain, bias, lag, jitter and timing noise);
+All synthetic (`tests/playsim.py` simulates a player with a known gain, bias, lag, jitter and timing noise, and
+now rotation, distance-proportional overshoot, a constant edge stop and EMI spikes); `test_habits.py` covers the
+habits, the store, the rulebook (caps, keep on noise, never prediction, never two smoothing filters), the coach
+wiring and the style card;
 nothing touches osu!, a real driver or the user's files: `test_playobserve.py`, `test_optimizer.py`
 (including a closed loop over 20 seeds, the local-problem rules, the area-trial logic and two noisy closed
 loops: an area 5 % too big and 2 mm off, and a well-tuned player that must not drift), `test_coach.py` (area

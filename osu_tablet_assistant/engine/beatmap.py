@@ -20,7 +20,7 @@ from pathlib import Path
 from typing import Iterator
 
 from ..models import DisplaySpec
-from .playtypes import Beatmap, HitObject
+from .playtypes import Beatmap, HitObject, PlayfieldBox
 
 PLAYFIELD_W, PLAYFIELD_H = 512.0, 384.0
 VIRTUAL_W, VIRTUAL_H = 640.0, 480.0
@@ -155,6 +155,14 @@ def parse_window_title(title: str | None) -> WindowTitle | None:
     return WindowTitle(name, version, artist.strip() if sep else "", song.strip() if sep else name)
 
 
+def title_key(title: str | None) -> str | None:
+    """The ``Artist - Title [Version]`` part of a window title exactly as osu! wrote it (None: no map named)."""
+    if parse_window_title(title) is None:
+        return None
+    rest = title.strip()[4:].lstrip()          # type: ignore[union-attr]
+    return rest[2:].strip()
+
+
 def _norm(text: str) -> str:
     return re.sub(r"\s+", " ", text).strip().casefold()
 
@@ -174,9 +182,15 @@ class IndexEntry:
     version: str
     mtime: float = 0.0
     size: int = 0
+    md5: str = ""                  # known when the entry comes from osu!.db or the lazer store
+    source: str = "songs"          # songs (header scan) | osudb | lazer
 
     def names(self) -> tuple[str, ...]:
         return (f"{self.artist} - {self.title}", f"{self.artist_unicode} - {self.title_unicode}")
+
+    def keys(self) -> tuple[str, ...]:
+        """``Artist - Title [Version]``, romanised and Unicode (what the window title can show)."""
+        return tuple(dict.fromkeys(f"{name} [{self.version}]" for name in self.names()))
 
 
 def read_header(path: Path) -> dict[str, str] | None:
@@ -229,23 +243,18 @@ class BeatmapIndex:
         except OSError:
             pass   # the cache only saves time
 
-    def scan(self) -> int:
-        """(Re)build :attr:`entries`; returns how many maps were found. Never raises."""
-        cache = self._load_cache()
-        fresh: dict[str, list] = {}
+    @staticmethod
+    def _read(paths: list[Path], cache: dict[str, list], fresh: dict[str, list]) -> list[IndexEntry]:
+        """Headers of ``paths`` (from ``cache`` while path+mtime+size match); ``fresh`` gets what was used."""
         entries: list[IndexEntry] = []
-        try:
-            files = sorted(self.songs_dir.glob("*/*.osu"))
-        except OSError:
-            files = []
-        for path in files:
+        for path in paths:
             try:
                 stat = path.stat()
             except OSError:
                 continue
             key = str(path)
             cached = cache.get(key)
-            if cached and cached[0] == stat.st_mtime and cached[1] == stat.st_size:
+            if cached and cached[0] == stat.st_mtime and cached[1] == stat.st_size and isinstance(cached[2], dict):
                 meta = cached[2]
             else:
                 meta = read_header(path)
@@ -256,10 +265,40 @@ class BeatmapIndex:
                 key, meta.get("Artist", ""), meta.get("Title", ""),
                 meta.get("ArtistUnicode", meta.get("Artist", "")), meta.get("TitleUnicode", meta.get("Title", "")),
                 meta.get("Version", ""), stat.st_mtime, stat.st_size))
-        self.entries = entries
+        return entries
+
+    def scan(self) -> int:
+        """(Re)build :attr:`entries`; returns how many maps were found. Never raises."""
+        cache = self._load_cache()
+        fresh: dict[str, list] = {}
+        try:
+            files = sorted(self.songs_dir.glob("*/*.osu"))
+        except OSError:
+            files = []
+        self.entries = self._read(files, cache, fresh)
         if fresh != cache:
             self._save_cache(fresh)
-        return len(entries)
+        return len(self.entries)
+
+    def scan_folders(self, folders: list[Path]) -> list[IndexEntry]:
+        """Headers of the ``.osu`` files in a few folders only (the osu!.db delta); :attr:`entries` is left alone.
+
+        The cache keeps every other entry, so the full :meth:`scan` and this delta share one file."""
+        files: list[Path] = []
+        for folder in folders:
+            try:
+                files.extend(sorted(p for p in folder.iterdir() if p.suffix.lower() == ".osu"))
+            except OSError:
+                continue
+        if not files:
+            return []
+        cache = self._load_cache()
+        fresh: dict[str, list] = {}
+        entries = self._read(files, cache, fresh)
+        if any(cache.get(k) != v for k, v in fresh.items()):
+            cache.update(fresh)
+            self._save_cache(cache)
+        return entries
 
     def find(self, info: WindowTitle) -> IndexEntry | None:
         """Best entry for a window title: same difficulty name and same "Artist - Title" (case-insensitive,
@@ -284,13 +323,26 @@ def find_beatmap(info: WindowTitle | str | None, index: BeatmapIndex) -> Beatmap
 
 
 # ---------------------------------------------------------------- transforms
-def playfield_scale(display: DisplaySpec) -> float:
-    """Desktop pixels per osu! pixel (screen height / 480)."""
-    return display.height_px / VIRTUAL_H
+def box_in_rect(left: float, top: float, width: float, height: float) -> PlayfieldBox | None:
+    """The playfield of a game area (desktop rectangle): the 640x480 virtual screen fitted 4:3 and centred."""
+    if width <= 0 or height <= 0:
+        return None
+    scale = min(width / VIRTUAL_W, height / VIRTUAL_H)
+    x0 = left + (width - VIRTUAL_W * scale) / 2
+    y0 = top + (height - VIRTUAL_H * scale) / 2
+    return PlayfieldBox(x0 + PLAYFIELD_OFFSET[0] * scale, y0 + PLAYFIELD_OFFSET[1] * scale, scale)
 
 
-def playfield_to_desktop(x: float, y: float, display: DisplaySpec) -> tuple[float, float]:
-    """osu! playfield pixel -> desktop pixel for a display centred at ``(offset_x, offset_y)``."""
+def playfield_scale(display: DisplaySpec, box: PlayfieldBox | None = None) -> float:
+    """Desktop pixels per osu! pixel (screen height / 480, or the measured box)."""
+    return box.scale if box is not None else display.height_px / VIRTUAL_H
+
+
+def playfield_to_desktop(x: float, y: float, display: DisplaySpec, box: PlayfieldBox | None = None
+                         ) -> tuple[float, float]:
+    """osu! playfield pixel -> desktop pixel for a display centred at ``(offset_x, offset_y)`` (or in ``box``)."""
+    if box is not None:
+        return box.left + x * box.scale, box.top + y * box.scale
     scale = playfield_scale(display)
     left = display.offset_x - display.width_px / 2
     top = display.offset_y - display.height_px / 2
@@ -298,8 +350,11 @@ def playfield_to_desktop(x: float, y: float, display: DisplaySpec) -> tuple[floa
     return x0 + (x + PLAYFIELD_OFFSET[0]) * scale, top + (y + PLAYFIELD_OFFSET[1]) * scale
 
 
-def desktop_to_playfield(px: float, py: float, display: DisplaySpec) -> tuple[float, float]:
+def desktop_to_playfield(px: float, py: float, display: DisplaySpec, box: PlayfieldBox | None = None
+                         ) -> tuple[float, float]:
     """Inverse of :func:`playfield_to_desktop`."""
+    if box is not None:
+        return (px - box.left) / box.scale, (py - box.top) / box.scale
     scale = playfield_scale(display)
     left = display.offset_x - display.width_px / 2
     top = display.offset_y - display.height_px / 2
