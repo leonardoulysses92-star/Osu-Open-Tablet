@@ -16,6 +16,10 @@ unificó en 0.8.0.
 
 <!-- versiones-nuevas-aqui -->
 
+## 0.9.0 (2026-11-01)
+
+- Coach profesional: aprende tus habitos y adapta el ajuste con reglas de la comunidad, reconoce el mapa al instante con osu!.db y calibra el cursor con el replay
+
 ## 0.8.1 (2026-11-01)
 
 - Suavizado con cinco niveles segun la comunidad, botones de menos y mas suavizado y aviso cuando ya hay demasiado
