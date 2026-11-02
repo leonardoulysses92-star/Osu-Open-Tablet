@@ -51,6 +51,7 @@ if (-not $Version) {
     }
 }
 if ($Version -notmatch $versionPattern) { throw "Version must look like 0.9.0 or 0.8.0.1, not '$Version'." }
+if ([int]$Matches[1] -ge 1) { throw 'Version 1.0 and above is not allowed yet: the project stays below 1.0 until the owner decides otherwise.' }
 $phase = "$($Matches[1]).$($Matches[2]).x"
 $tag = "v$Version"
 if (& $git tag --list $tag) { throw "The tag $tag already exists." }

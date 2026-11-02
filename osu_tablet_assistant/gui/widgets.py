@@ -75,7 +75,6 @@ LABEL_ROLES: dict[str, tuple[str, str]] = {
     "Heading": ("heading", "text"),
     "Title": ("title", "text"),
     "Display": ("display", "text"),
-    "Eyebrow": ("small_bold", "accent"),
     "Accent": ("strong", "accent"),
     "Error": ("body", "error"),
     "Good": ("body", "good"),

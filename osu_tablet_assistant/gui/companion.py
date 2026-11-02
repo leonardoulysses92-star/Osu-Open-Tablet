@@ -10,8 +10,9 @@ Three layers:
   fullscreen, hence the beeps from ``gui.hotkeys``).
 * :class:`CompanionWindow`: a normal window with a compact shortcut panel
   (small buttons that show their key combination, the step-size selector,
-  the last change and a "Shortcuts" editor with Detect / Reset), a quick
-  "how did that map feel?" poll, policy selector, live numbers, Undo/Keep.
+  the last change and a "Shortcuts" editor with Detect / Reset) and a quick
+  "how did that map feel?" poll. The live numbers, "back to start", the policy
+  selector, sound and the limits are folded under "More options".
   Hotkeys and step size are saved in the assistant's config.
 
 Integration (wizard)::
@@ -47,7 +48,7 @@ from ..otd.livetune import (LiveTuner, OsuWatcher, SendOutcome, controller_sende
 from . import hotkeys as hk
 from .i18n import t as default_t
 from .palette import COLORS, mix
-from .widgets import (FONT_FAMILY, Card, Columns, ScrollFrame, WrapLabel, apply_theme, button, check,
+from .widgets import (FONT_FAMILY, Card, Expander, ScrollFrame, WrapLabel, apply_theme, button, check,
                       dark_title_bar, font, frame, label, px, radio, segmented, surface_color)
 
 BG, SURFACE, FG, MUTED, ACCENT, WARN = COLORS.bg, COLORS.surface, COLORS.text, COLORS.muted, COLORS.accent, COLORS.warn
@@ -56,7 +57,6 @@ TICK_MS = 40
 SAMPLE_DRAIN_S = 0.5
 HINT_REFRESH_S = 2.0
 WATCH_INTERVAL_S = 3.0
-COLUMNS_BREAKPOINT = 820          # px of content width for the two lower columns
 INTENT_ACTIONS = ("smoother", "responsive", "precise", "looser", "area_bigger", "area_smaller")
 
 Translate = Callable[..., str]
@@ -528,25 +528,7 @@ class CompanionWindow:
         self._build_panel(outer)
         self._build_keys_editor(outer)
 
-        # two columns on a wide window, one below the breakpoint
-        cols = Columns(outer, breakpoint=px(outer, COLUMNS_BREAKPOINT), gap=10)
-        self.columns = cols
-        cols.pack(fill="x")
-        left = frame(cols)
-        right = frame(cols)
-        cols.add(left)
-        cols.add(right)
-
-        live = self._section(left, "companion.section.live")
-        self.var_values = tk.StringVar()
-        self.var_last = tk.StringVar()
-        self.var_hints = tk.StringVar()
-        self._label(live, var=self.var_values, size=9)
-        self._label(live, var=self.var_last, size=9, color=ACCENT)
-        self._label(live, var=self.var_hints, size=9, color=MUTED)
-        self._button(live, self.t("companion.action.revert"), self.revert_all).pack(anchor="w", pady=(6, 0))
-
-        poll = self._section(left, "companion.section.poll")
+        poll = self._section(outer, "companion.section.poll")
         self.var_motion = tk.StringVar(value="")
         self.var_rest = tk.StringVar(value="")
         for var, options, prefix in ((self.var_motion, adapt.POLL_MOTION, "motion"),
@@ -558,7 +540,18 @@ class CompanionWindow:
                                 style="Segment.Toolbutton", takefocus=True).pack(side="left", expand=True, fill="x")
         self._button(poll, self.t("companion.poll.send"), self.send_poll).pack(fill="x", pady=(px(outer, 2), 0))
 
-        pol = self._section(right, "companion.section.policy")
+        # the live numbers, "back to start", what may be changed, sound and the limits: folded
+        more = Expander(outer, self.t("companion.more"), widgets=True)
+        more.pack(fill="x")
+        box = more.content
+        live = self._section(box, "companion.section.live")
+        self.var_values = tk.StringVar()
+        self.var_hints = tk.StringVar()
+        self._label(live, var=self.var_values, size=9)
+        self._label(live, var=self.var_hints, size=9, color=MUTED)
+        self._button(live, self.t("companion.action.revert"), self.revert_all).pack(anchor="w", pady=(6, 0))
+
+        pol = self._section(box, "companion.section.policy")
         self.var_policy = tk.StringVar(value=self.core.policy.mode.value)
         for mode in PolicyMode:   # a radio with no text plus a wrapping label: long choices never widen the card
             row = frame(pol)
@@ -568,12 +561,12 @@ class CompanionWindow:
             text.pack(side="left", fill="x", expand=True)
             text.bind("<Button-1>", lambda _e, m=mode.value: (self.var_policy.set(m), self._policy_changed()))
 
-        opts = self._section(right, "companion.section.options")
+        opts = self._section(box, "companion.section.options")
         self.var_sound = tk.BooleanVar(value=self.beeper.enabled)
         check(opts, self.t("companion.option.sound"), self.var_sound, command=self._sound_changed).pack(anchor="w")
         self.var_keys = tk.StringVar()
         self._label(opts, var=self.var_keys, size=9, color=MUTED)
-        self._label(outer, "companion.limits", 8, MUTED)
+        self._label(box, "companion.limits", 8, MUTED)
 
     def _build_panel(self, outer: tk.Misc) -> None:
         """The compact shortcut strip: step selector, "Shortcuts" button, 8 small buttons, one status line."""
@@ -606,9 +599,11 @@ class CompanionWindow:
         self._panel_cols = 0
         self.var_step = tk.StringVar()
         self.var_change = tk.StringVar()
+        self.var_last = tk.StringVar()          # what the last press did (or why nothing moved)
         self._label(card.body, var=self.var_step, size=9, color=ACCENT, bold=True).pack_configure(
             pady=(px(outer, 4), 0))
         self._label(card.body, var=self.var_change, size=9)
+        self._label(card.body, var=self.var_last, size=9, color=MUTED)
         self._refresh_buttons()
         self._layout_panel(4)
         card.body.bind("<Configure>", lambda e: self._layout_panel(self._panel_columns_for(e.width)), add="+")

@@ -40,8 +40,8 @@ from .keycard import ClickKeysCard
 from .smoothcard import SmoothingCard
 from .stylecard import StyleCard
 from .tabletmap import TabletMap
-from .widgets import (COLORS, Card, Chip, Expander, Notice, ScrollFrame, WrapLabel, apply_theme, bullets, button,
-                      check, dark_title_bar, frame, icon_image, label, px, surface_color)
+from .widgets import (COLORS, Card, Chip, Expander, Notice, ReadOnlyText, ScrollFrame, WrapLabel, apply_theme,
+                      bullets, button, check, dark_title_bar, frame, icon_image, label, px, surface_color)
 
 TICK_MS = 100
 MAP_POLL_S = 0.1       # how often osu!'s window title is read (one cheap window enumeration; lookups are O(1))
@@ -107,6 +107,8 @@ class CoachWindow:
         self._smooth_state: dict = {"open": False}     # ... and so do the smoothing card ...
         self._manual_state: dict = {"open": False}     # ... and "Ajustar el área a mano"
         self._style_state: dict = {}                   # ... and "Tu estilo de juego" (opens itself when it acts)
+        self._more_state: dict = {"open": False}       # ... and the folds "Más opciones" / "Más detalles"
+        self._details_state: dict = {"open": False}
         self.style_card: StyleCard | None = None
         self.smooth_card: SmoothingCard | None = None
         self._area_holder: ttk.Frame | None = None
@@ -248,31 +250,32 @@ class CoachWindow:
         self.keys_card = ClickKeysCard(self.body, self.key_choice, self.t, self._keys_changed, core.analysis_detail,
                                        self._detail_changed, self._keys_state)
         self.keys_card.pack(fill="x", pady=(0, px(self.root, 8)))
-        self._free_var = tk.BooleanVar(value=not core.aspect_lock)
-        check(self.body, self.t("play.aspect.label"), self._free_var, command=self._aspect_changed).pack(anchor="w")
-        WrapLabel(self.body, self.t("play.aspect.note"), "Small").pack(fill="x", pady=(0, px(self.root, 8)))
+        self._smooth_holder = frame(self.body)
+        self._smooth_holder.pack(fill="x", pady=(0, px(self.root, 8)))
+        self._build_smooth_card()
         self.map = TabletMap(self.body, height=190)
         self.map.pack(fill="x", pady=(0, px(self.root, 8)))
         self.map.set_setup(core.tablet, core.area, core.display)
         self._area_holder = frame(self.body)
         self._area_holder.pack(fill="x", pady=(0, px(self.root, 8)))
         self._build_area_card(self._area_holder, editable=True)
-        self._smooth_holder = frame(self.body)
-        self._smooth_holder.pack(fill="x", pady=(0, px(self.root, 8)))
-        self._build_smooth_card()
-        WrapLabel(self.body, self.t("play.prepare.honest", keys=display_list(core.keys)), "Small").pack(
-            fill="x", pady=(0, px(self.root, 10)))
-        if core.result is None and core.state.rounds:
-            WrapLabel(self.body, self._progress_text(), "Muted").pack(fill="x", pady=(0, px(self.root, 6)))
-        self._mini_var = tk.BooleanVar(value=self.mini is not None)
-        adv = Expander(self.body, self.t("play.prepare.options"), height=9)
-        adv.pack(fill="x", pady=(px(self.root, 10), 0))
-        adv.set(ledger_text(self.t, core.keys))
-        check(self.body, self.t("play.prepare.minimap"), self._mini_var, command=self._toggle_mini).pack(
-            anchor="w", pady=(px(self.root, 2), 0))
-        WrapLabel(self.body, self.t("play.prepare.minimap_note"), "Small").pack(fill="x")
         if core.state.rounds:
             self._build_progress_strip(self.body)
+        # the rarely changed options and the privacy details: folded (the fold remembers it is open)
+        more = Expander(self.body, self.t("play.prepare.more"), widgets=True, opened=bool(self._more_state["open"]),
+                        on_toggle=lambda opened: self._more_state.__setitem__("open", opened))
+        more.pack(fill="x", pady=(px(self.root, 4), 0))
+        box = more.content
+        self._free_var = tk.BooleanVar(value=not core.aspect_lock)
+        check(box, self.t("play.aspect.label"), self._free_var, command=self._aspect_changed).pack(anchor="w")
+        WrapLabel(box, self.t("play.aspect.note"), "Small").pack(fill="x", pady=(0, px(self.root, 8)))
+        self._mini_var = tk.BooleanVar(value=self.mini is not None)
+        check(box, self.t("play.prepare.minimap"), self._mini_var, command=self._toggle_mini).pack(anchor="w")
+        WrapLabel(box, self.t("play.prepare.minimap_note"), "Small").pack(fill="x", pady=(0, px(self.root, 8)))
+        WrapLabel(box, self.t("play.prepare.honest", keys=display_list(core.keys)), "Small").pack(fill="x")
+        ledger = Expander(box, self.t("play.prepare.options"), height=9)
+        ledger.pack(fill="x", pady=(px(self.root, 4), 0))
+        ledger.set(ledger_text(self.t, core.keys))
         self._build_prepare_footer(ready)
 
     def _build_prepare_footer(self, ready: Readiness) -> None:
@@ -310,9 +313,10 @@ class CoachWindow:
         if changes:
             WrapLabel(card.body, self.t("play.area.since"), "Small").pack(fill="x", pady=(px(self.root, 4), 0))
             bullets(card.body, changes, role="Small").pack(fill="x")
-        WrapLabel(card.body, self.t("play.area.otd_note"), "Small").pack(fill="x", pady=(px(self.root, 2), 0))
         if editable:
             self._build_manual(card.body)
+        else:
+            WrapLabel(card.body, self.t("play.area.otd_note"), "Small").pack(fill="x", pady=(px(self.root, 2), 0))
 
     def _build_manual(self, parent: tk.Misc) -> None:
         """"Ajustar el área a mano": size -/+ 2 %, move 0.5 mm, one axis with the free proportion; undo."""
@@ -320,7 +324,8 @@ class CoachWindow:
                         on_toggle=lambda opened: self._manual_state.__setitem__("open", opened))
         fold.pack(fill="x", pady=(px(self.root, 6), 0))
         box = fold.content
-        WrapLabel(box, self.t("play.manual.intro"), "Small").pack(fill="x", pady=(0, px(self.root, 4)))
+        WrapLabel(box, self.t("play.manual.intro") + " " + self.t("play.area.otd_note"), "Small").pack(
+            fill="x", pady=(0, px(self.root, 4)))
         self.manual_buttons: dict[str, Any] = {}
         groups = [("play.manual.size", ("smaller", "bigger")), ("play.manual.move", tuple(MANUAL_MOVES))]
         if not self.core.aspect_lock:
@@ -507,14 +512,12 @@ class CoachWindow:
         self.map.set_setup(core.tablet, core.area, core.display)
         self.map.set_cells(report.cells)
         self.map.add_results(report.results, report.radius_mm)
-        if proposal.probe_outcome is not None:          # what happened to the trial this round was played on
-            card = Card(self.body, self.t("play.probe.title"), padding=12)
-            card.pack(fill="x", pady=(0, px(self.root, 8)))
-            WrapLabel(card.body, self._say(proposal.probe_outcome), "Strong").pack(fill="x")
         for verdict in core.smoothing_verdicts():
             self._build_smooth_verdict(verdict)
         card = Card(self.body, self.t("play.report.found_title"))
         card.pack(fill="x", pady=(0, px(self.root, 8)))
+        if proposal.probe_outcome is not None:          # what happened to the trial this round was played on
+            WrapLabel(card.body, self._say(proposal.probe_outcome), "Strong").pack(fill="x", pady=(0, px(self.root, 4)))
         bullets(card.body, [self._say(r) for r in result.findings[:4]]).pack(fill="x")
         if result.hint is not None:
             WrapLabel(card.body, self._say(result.hint), "Strong").pack(fill="x", pady=(px(self.root, 6), 0))
@@ -524,24 +527,39 @@ class CoachWindow:
             card = Card(self.body, self.t("play.report.change_title"), accent=COLORS.accent)
             card.pack(fill="x", pady=(0, px(self.root, 8)))
             WrapLabel(card.body, self._say(proposal.message) if proposal.message else "", "Strong").pack(fill="x")
-            bullets(card.body, [self._say(r) for r in proposal.reasons[:3]], role="Small").pack(fill="x")
             WrapLabel(card.body, self.t("play.report.live_note"), "Small").pack(fill="x", pady=(px(self.root, 4), 0))
+            if proposal.reasons:
+                why = Expander(card.body, self.t("play.report.why"), widgets=True)
+                why.pack(fill="x", pady=(px(self.root, 4), 0))
+                bullets(why.content, [self._say(r) for r in proposal.reasons[:3]], role="Small").pack(fill="x")
         elif proposal.message:
             WrapLabel(self.body, self._say(proposal.message), "Muted").pack(fill="x", pady=(0, px(self.root, 8)))
         self._build_style_card()
-        holder = frame(self.body)
-        holder.pack(fill="x", pady=(0, px(self.root, 8)))
-        self._build_area_card(holder, editable=False, proposed=proposal.area if proposal.kind != "none" else None)
         self._build_progress_strip(self.body)
         WrapLabel(self.body, self._say(result.convergence.message), "Strong").pack(fill="x", pady=(0, px(self.root, 8)))
         if result.from_replay:
             WrapLabel(self.body, self.t("play.replay.used"), "Small").pack(fill="x", pady=(0, px(self.root, 6)))
         elif result.check is not None:
             self._build_check(result.check)
+        # the numbers behind the report: folded (the fold remembers it is open)
+        more = Expander(self.body, self.t("play.report.details"), widgets=True,
+                        opened=bool(self._details_state["open"]),
+                        on_toggle=lambda opened: self._details_state.__setitem__("open", opened))
+        more.pack(fill="x", pady=(px(self.root, 2), 0))
+        box = more.content
+        holder = frame(box)
+        holder.pack(fill="x", pady=(0, px(self.root, 8)))
+        self._build_area_card(holder, editable=False, proposed=proposal.area if proposal.kind != "none" else None)
         if result.pointer:                              # replay calibration / cursor trust (engine.calibrate)
-            card = Card(self.body, self.t("play.report.pointer_title"), padding=12)
+            card = Card(box, self.t("play.report.pointer_title"), padding=12)
             card.pack(fill="x", pady=(0, px(self.root, 8)))
             bullets(card.body, [self._say(r) for r in result.pointer[:4]], role="Small").pack(fill="x")
+        if not result.from_replay and result.check is None:
+            button(box, self.t("play.report.verify_replay"), lambda: self.pick_replay("verify"), kind="ghost").pack(
+                anchor="w", pady=(0, px(self.root, 4)))
+        tech = ReadOnlyText(box, height=8)
+        tech.pack(fill="x")
+        tech.set(self._technical_text(report, result))
         done = proposal.kind == "none"
         self.status = Notice(self.footer)               # the whole action bar stays visible while the report scrolls
         self.status.pack(fill="x", pady=(0, px(self.root, 6)))
@@ -561,17 +579,11 @@ class CoachWindow:
         row.pack(fill="x", pady=(px(self.root, 4), 0))
         undo = button(row, self.t("play.report.undo"), self.undo, kind="ghost")
         undo.pack(side="left")
-        if not result.from_replay and result.check is None:
-            button(row, self.t("play.report.verify_replay"), lambda: self.pick_replay("verify"), kind="ghost").pack(
-                side="left", padx=(px(self.root, 4), 0))
         undo.configure(state="normal" if core.tuner.can_undo else "disabled")
         if not (done and proposal.verdict == opt.PLATEAU):
             self._build_keep_row(self.footer, only_restore=False)
         else:
             button(row, self.t("play.report.restore"), self.restore, kind="ghost").pack(side="left")
-        tech = Expander(self.body, self.t("gui.details.title"), height=8)
-        tech.pack(fill="x", pady=(px(self.root, 6), 0))
-        tech.set(self._technical_text(report, result))
 
     def _build_style_card(self) -> None:
         """"Tu estilo de juego": the habits seen over the plays, and what the setup does to suit them."""
@@ -665,9 +677,6 @@ class CoachWindow:
             button(row, self.t("play.report.keep"), self.keep, kind="secondary").pack(side="left")
         button(row, self.t("play.report.restore"), self.restore, kind="ghost").pack(
             side="left", padx=(px(self.root, 8), 0))
-
-    def _progress_text(self) -> str:
-        return self.t("play.progress.rounds", n=len(self.core.state.rounds))
 
     def _technical_text(self, report: PlayReport, result: RoundResult) -> str:
         a = report.alignment

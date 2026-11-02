@@ -110,8 +110,9 @@ class LocaleFileTests(unittest.TestCase):
                             ("priority", Priority), ("skill_level", SkillLevel)):
             expected |= {f"core.pref.{field}.{m.value}" for m in enum}
             expected |= {f"gui.questions.{field}.title", f"gui.questions.{field}.why"}
-        for name in ("notices_jitter", "notices_input_lag"):
-            expected |= {f"gui.questions.{name}.{part}" for part in ("title", "why", "label")}
+        for name in ("notices_jitter", "notices_input_lag"):      # both in one "symptoms" card
+            expected |= {f"gui.questions.{name}.{part}" for part in ("why", "label")}
+        expected.add("gui.questions.symptoms.title")
         expected |= {f"gui.questions.keep_area.{part}" for part in ("title", "why", "label")}
         expected |= {f"gui.test.{kind}.{part}" for kind in ("rate", "stillness", "tracking", "aim")
                      for part in ("name", "desc")}

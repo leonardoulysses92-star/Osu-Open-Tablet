@@ -83,7 +83,6 @@ from .widgets import (
 )
 
 _GAP = 16          # vertical space between cards (96-dpi px)
-_SHOWN_REASONS = 3  # engine reasons visible before "show all" on the result screen
 _PAGE_MAX_WIDTH = 980
 
 
@@ -172,15 +171,16 @@ class Page(ttk.Frame):
 
 
 def how_to_card(page: Page, compact: bool = False) -> None:
-    """Explain the pen tests: no clicks, touch or hover, results measure speed (and precision)."""
+    """Explain the pen tests in one line (no clicks, touch or hover, Esc); the full how-to is folded below it."""
+    notice = Notice(page)
+    notice.pack(fill="x", pady=(0, px(page, 4) if not compact else page.gap()))
+    notice.show(t("gui.howto.short"), "info")
     if compact:
-        notice = Notice(page)
-        notice.pack(fill="x", pady=(0, page.gap()))
-        notice.show(t("gui.howto.short"), "info")
         return
-    box = page.card(t("gui.howto.title"), accent=COLORS.info)
-    bullets(box.body, [t("gui.howto.no_clicks"), t("gui.howto.hover"), t("gui.howto.speed"),
-                       t("gui.howto.cancel")]).pack(fill="x")
+    fold = Expander(page, t("gui.howto.title"), widgets=True)
+    fold.pack(fill="x", pady=(0, page.gap(12)))
+    bullets(fold.content, [t("gui.howto.no_clicks"), t("gui.howto.hover"), t("gui.howto.speed"),
+                           t("gui.howto.cancel")], role="Small").pack(fill="x")
 
 
 # ------------------------------------------------------------- community data
@@ -250,9 +250,7 @@ class WelcomePage(Page):
 
     def build(self) -> None:
         s = self.session
-        label(self, t("gui.welcome.eyebrow"), "Eyebrow").pack(anchor="w")
-        label(self, t("gui.welcome.title"), "Display").pack(anchor="w", pady=(px(self, 2), px(self, 6)))
-        WrapLabel(self, t("gui.welcome.intro"), "Muted").pack(fill="x", pady=(0, self.gap(20)))
+        label(self, t("gui.welcome.title"), "Display").pack(anchor="w", pady=(0, self.gap(18)))
         if s.dry_run:
             notice = Notice(self)
             notice.pack(fill="x", pady=(0, self.gap()))
@@ -308,18 +306,10 @@ class WelcomePage(Page):
         last = saved.last
         if last is not None:
             WrapLabel(box.body, t("gui.welcome.back_last", date=last.when[:10],
-                                  source=t(f"gui.welcome.source.{last.source}")), "Body").pack(fill="x")
-        if saved.coach:
-            c = saved.coach[0]
-            gain = c.get("gain_pct")
-            WrapLabel(box.body, t("gui.welcome.back_coach", date=c["when"][:10], rounds=c["rounds"])
-                      + (" " + t("gui.welcome.back_gain", pct=f"{gain:.0f}") if gain else ""), "Small").pack(fill="x")
+                                  source=t(f"gui.welcome.source.{last.source}")), "Small").pack(fill="x")
         self._resume_notice = Notice(box.body)
         self._resume_notice.pack(fill="x", pady=(px(self, 6), 0))
-        row = frame(box.body)
-        row.pack(fill="x", pady=(px(self, 8), 0))
-        button(row, t("gui.welcome.back_resume"), self._resume).pack(side="left")
-        label(row, t("gui.welcome.back_resume_note"), "Small").pack(side="left", padx=(px(self, 10), 0))
+        button(box.body, t("gui.welcome.back_resume"), self._resume).pack(anchor="w", pady=(px(self, 8), 0))
 
     def _resume(self) -> None:
         if not self.session.accepted_disclaimer:
@@ -370,11 +360,14 @@ class DetectPage(Page):
         self._locations_card.pack_forget()
         row = self.actions()
         button(row, t("gui.detect.retry"), self._start).pack(side="left")
-        button(row, t("gui.detect.pick_config"), lambda: self._pick(True), kind="ghost").pack(
-            side="left", padx=(px(self, 8), 0))
+        # picking the folders by hand is only needed when the search fails (it opens by itself then)
+        self._manual = Expander(self, t("gui.detect.manual_title"), widgets=True)
+        self._manual.pack(fill="x")
+        row = frame(self._manual.content)
+        row.pack(fill="x")
+        button(row, t("gui.detect.pick_config"), lambda: self._pick(True), kind="ghost").pack(side="left")
         button(row, t("gui.detect.pick_install"), lambda: self._pick(False), kind="ghost").pack(
             side="left", padx=(px(self, 4), 0))
-        WrapLabel(self, t("gui.detect.safe_note"), "Small").pack(fill="x")
         self._details = Expander(self, t("gui.details.log"))
         self._details.pack(fill="x", pady=(px(self, 8), 0))
         if self.session.settings is None:
@@ -412,6 +405,8 @@ class DetectPage(Page):
                           detail + "\n" + "\n".join(self.session.log))
         self._summary_card.pack_forget()
         self._details.set(detail + "\n" + "\n".join(self.session.log))
+        if not self._manual.is_open:
+            self._manual.toggle()
         self.wizard.update_nav()
 
     def _render(self) -> None:
@@ -421,8 +416,8 @@ class DetectPage(Page):
             child.destroy()
         names = ", ".join(p.tablet_name for p in s.profiles) or t("gui.detect.no_profiles")
         self._summary.columnconfigure(1, weight=1)
+        # the folders found are in the technical log below; the summary keeps what the player recognises
         for row, (key, value) in enumerate((
-                ("gui.detect.k.config", str(s.config_dir)), ("gui.detect.k.install", str(s.install_dir or "-")),
                 ("gui.detect.k.profiles", names), ("gui.detect.k.plugins", str(len(s.plugins))))):
             label(self._summary, t(key), "Muted").grid(row=row, column=0, sticky="nw",
                                                         padx=(0, px(self, 16)), pady=px(self, 3))
@@ -472,7 +467,7 @@ class TabletPage(Page):
     def build(self) -> None:
         self._choices: list[TabletChoice] = self.session.tablet_choices()
         self.title("gui.tablet.title", t("gui.tablet.intro"))
-        box = self.card(t("gui.tablet.list_title"), t("gui.tablet.approx_note"), tip=t("gui.tip.tablet_list"))
+        box = self.card(t("gui.tablet.list_title"), tip=t("gui.tip.tablet_list") + "\n\n" + t("gui.tablet.approx_note"))
         search = frame(box.body)
         search.pack(fill="x", pady=(0, px(self, 10)))
         label(search, t("gui.tablet.search")).pack(side="left")
@@ -506,7 +501,12 @@ class TabletPage(Page):
         self._show_summary()
 
     def _build_custom(self) -> None:
-        body = self.card(t("gui.tablet.custom_title"), t("gui.tablet.custom_help")).body
+        """"My tablet is not in the list": folded until needed (it opens itself for a tablet without a size)."""
+        self._custom = Expander(self, t("gui.tablet.custom_title"), widgets=True)
+        self._custom.pack(fill="x", pady=(0, self.gap()))
+        WrapLabel(self._custom.content, t("gui.tablet.custom_help"), "Small").pack(fill="x", pady=(0, px(self, 6)))
+        body = frame(self._custom.content)
+        body.pack(fill="x")
         self._vars = {k: tk.StringVar(value=v) for k, v in (
             ("name", ""), ("width", ""), ("height", ""), ("rate", "133"), ("pressure", "0"))}
         fields = (("name", "gui.tablet.custom.name", None), ("width", "gui.tablet.custom.width", "gui.tip.area"),
@@ -556,6 +556,8 @@ class TabletPage(Page):
         if not self.session.select_choice(choice):
             self._vars["name"].set(choice.label)
             self._custom_error.configure(text=t("gui.tablet.unknown_profile"))
+            if not self._custom.is_open:
+                self._custom.toggle()
         else:
             self._custom_error.configure(text="")
         self._show_summary()
@@ -620,23 +622,30 @@ class DisplayPage(Page):
             "refresh": tk.StringVar(value=f"{d.refresh_hz:g}" if d else "60"),
         }
         box = self.card(t("gui.display.values"))
-        body = box.body
-        body.columnconfigure(2, weight=1)
-        for index, key in enumerate(("width", "height", "left", "top", "refresh")):
-            label(body, t(f"gui.display.{key}"), "Strong").grid(row=index, column=0, sticky="w",
-                                                                 pady=px(self, 6))
-            ttk.Entry(body, textvariable=self._vars[key], width=10).grid(
-                row=index, column=1, sticky="w", padx=px(self, 14), pady=px(self, 6))
-            WrapLabel(body, t(f"gui.display.{key}_help"), "Muted").grid(
-                row=index, column=2, sticky="we", pady=px(self, 6))
-        row = self.actions(body)
-        row.grid(row=5, column=0, columnspan=3, sticky="w", pady=(px(self, 10), 0))
+        self._fields(box.body, ("width", "height", "refresh"))
+        row = self.actions(box.body)
+        row.pack(fill="x", pady=(px(self, 10), 0))
         button(row, t("gui.display.redetect"), self._redetect).pack(side="left")
         self._message = Notice(self)
         self._message.pack(fill="x")
-        tip = Notice(self)
-        tip.pack(fill="x", pady=(self.gap(), 0))
-        tip.show(t("gui.display.multi_monitor"), "info")
+        # another monitor than the main one: the position fields, folded unless already in use
+        moved = any(self._vars[k].get() not in ("", "0") for k in ("left", "top"))
+        other = Expander(self, t("gui.display.other_monitor"), widgets=True, opened=moved)
+        other.pack(fill="x", pady=(self.gap(8), 0))
+        WrapLabel(other.content, t("gui.display.multi_monitor"), "Small").pack(fill="x", pady=(0, px(self, 6)))
+        self._fields(other.content, ("left", "top"))
+
+    def _fields(self, parent: tk.Misc, keys: tuple[str, ...]) -> None:
+        """Label, "?" with the help text and an entry per value."""
+        grid = frame(parent)
+        grid.pack(fill="x")
+        for index, key in enumerate(keys):
+            cell = frame(grid)
+            cell.grid(row=index, column=0, sticky="w", pady=px(self, 5))
+            label(cell, t(f"gui.display.{key}"), "Strong").pack(side="left")
+            InfoTip(cell, t(f"gui.display.{key}_help")).pack(side="left", padx=(px(self, 6), 0))
+            ttk.Entry(grid, textvariable=self._vars[key], width=10).grid(
+                row=index, column=1, sticky="w", padx=px(self, 14), pady=px(self, 5))
 
     def _redetect(self) -> None:
         try:
@@ -670,9 +679,7 @@ class DisplayPage(Page):
 
 
 # ---------------------------------------------------------------- questionnaire
-_QUESTION_TIPS = {"play_style": "gui.tip.area", "priority": "gui.tip.smoothing",
-                  "notices_jitter": "gui.tip.jitter", "notices_input_lag": "gui.tip.latency",
-                  "plugin_policy": "gui.tip.plugins"}
+_QUESTION_TIPS = {"play_style": "gui.tip.area", "priority": "gui.tip.smoothing"}
 
 
 class QuestionsPage(Page):
@@ -685,8 +692,11 @@ class QuestionsPage(Page):
         self._radio("map_preference", prefs.map_preference, MapPreference)
         self._radio("priority", prefs.priority, Priority)
         self._radio("skill_level", prefs.skill_level, SkillLevel)
-        self._check("notices_jitter", prefs.notices_jitter)
-        self._check("notices_input_lag", prefs.notices_input_lag)
+        box = self.card(t("gui.questions.symptoms.title"), tip="\n\n".join(
+            t(key) for key in ("gui.questions.notices_jitter.why", "gui.tip.jitter",
+                               "gui.questions.notices_input_lag.why", "gui.tip.latency")))
+        for name in ("notices_jitter", "notices_input_lag"):
+            self._check(box, name, getattr(prefs, name))
         profile = self.session.profile
         self._keep = tk.BooleanVar(value=prefs.preferred_area_width_mm is not None)
         if profile is not None:
@@ -696,15 +706,19 @@ class QuestionsPage(Page):
         self._policy_block()
 
     def _policy_block(self) -> None:
-        """Which plugins the assistant may use (it never installs any)."""
-        box = self._block("plugin_policy")
+        """Which plugins the assistant may use (it never installs any). Folded: the default suits most players."""
+        fold = Expander(self, t("gui.questions.plugin_policy.title"), widgets=True)
+        fold.pack(fill="x")
+        body = fold.content
+        WrapLabel(body, t("gui.questions.plugin_policy.why") + " " + t("gui.tip.plugins"), "Small").pack(
+            fill="x", pady=(0, px(self, 6)))
         var = tk.StringVar(value=self.session.prefs.plugin_policy.value)
         for policy in PluginPolicy:
-            radio(box.body, t(f"core.pref.plugin_policy.{policy.value}"), policy.value, var).pack(anchor="w")
-            WrapLabel(box.body, t(f"gui.questions.plugin_policy.{policy.value}_help"), "Small").pack(
+            radio(body, t(f"core.pref.plugin_policy.{policy.value}"), policy.value, var).pack(anchor="w")
+            WrapLabel(body, t(f"gui.questions.plugin_policy.{policy.value}_help"), "Small").pack(
                 fill="x", padx=(px(self, 26), 0), pady=(0, px(self, 4)))
         installed = ", ".join(sorted(p.name for p in self.session.plugins)) or t("gui.questions.plugin_policy.none")
-        label(box.body, t("gui.questions.plugin_policy.installed_list", plugins=installed), "Small").pack(
+        label(body, t("gui.questions.plugin_policy.installed_list", plugins=installed), "Small").pack(
             anchor="w", pady=(px(self, 6), 0))
         var.trace_add("write", lambda *_: self.session.set_plugin_policy(PluginPolicy(var.get())))
 
@@ -716,9 +730,10 @@ class QuestionsPage(Page):
         return True
 
     def _block(self, name: str) -> Card:
+        """A question card: the title and the choices; why we ask (and the term explained) sit behind the "?"."""
         tip = _QUESTION_TIPS.get(name)
-        return self.card(t(f"gui.questions.{name}.title"), t(f"gui.questions.{name}.why"),
-                         tip=t(tip) if tip else None)
+        why = t(f"gui.questions.{name}.why")
+        return self.card(t(f"gui.questions.{name}.title"), tip=why + ("\n\n" + t(tip) if tip else ""))
 
     def _radio(self, name: str, current: Any, enum: type) -> None:
         box = self._block(name)
@@ -727,8 +742,7 @@ class QuestionsPage(Page):
             radio(box.body, t(f"core.pref.{name}.{member.value}"), member.value, var).pack(anchor="w")
         var.trace_add("write", lambda *_: setattr(self.session.prefs, name, enum(var.get())))
 
-    def _check(self, name: str, current: bool) -> None:
-        box = self._block(name)
+    def _check(self, box: Card, name: str, current: bool) -> None:
         var = tk.BooleanVar(value=current)
         check(box.body, t(f"gui.questions.{name}.label"), var).pack(anchor="w")
         var.trace_add("write", lambda *_: setattr(self.session.prefs, name, var.get()))
@@ -819,8 +833,10 @@ class BaselinePage(Page):
         self._message.pack(fill="x")
 
     def _show_status(self, kind: str) -> None:
+        """Chip, result line and button of one test; only the next test still to do gets the primary button."""
         report = self.session.baseline_report(kind)
         run, chip, result = self._rows[kind]
+        pending = [k for k in self._rows if not self.session.baseline_report(k)]
         if report:
             chip.set(t("gui.baseline.done"), "success")
             result.configure(text=" · ".join(metric_lines([report])))
@@ -828,7 +844,8 @@ class BaselinePage(Page):
         else:
             chip.set(t("gui.baseline.not_done"))
             result.configure(text="")
-            run.configure(text=t("gui.baseline.run"), style="Primary.TButton")
+            run.configure(text=t("gui.baseline.run"),
+                          style="Primary.TButton" if pending[:1] == [kind] else "Secondary.TButton")
 
     def _set_enabled(self, enabled: bool) -> None:
         for run, _chip, _result in self._rows.values():
@@ -842,7 +859,8 @@ class BaselinePage(Page):
         def finished(_report: MetricsReport | None = None) -> None:
             if self.alive():
                 self._set_enabled(True)
-                self._show_status(kind)
+                for each in self._rows:          # the primary button moves on to the next test
+                    self._show_status(each)
 
         try:
             self.session.run_measurement(self.wizard.winfo_toplevel(), kind, on_done=finished,
@@ -869,7 +887,8 @@ class TestingPage(Page):
             how_to_card(self, compact=True)
         columns = Columns(self, breakpoint=px(self, 880))
         columns.pack(fill="x")
-        left = self.card(t("gui.testing.options_title"), parent=columns)
+        left = self.card(t("gui.testing.options_title"), parent=columns,
+                         tip=t("gui.testing.table_help") if s.can_measure else None)
         columns.add(left)
         # column #0 holds the marker of the best options (a small accent dot, see _refresh_rows)
         self._tree = ttk.Treeview(left.body, columns=("label", "status", "result"), style="Marked.Treeview",
@@ -889,8 +908,6 @@ class TestingPage(Page):
         self._tree.tag_configure("top", font=font("strong"))
         self._tree.bind("<<TreeviewSelect>>", lambda _e: self._show_detail())
         self._tie_note = WrapLabel(left.body, "", "Small")
-        if s.can_measure:
-            WrapLabel(left.body, t("gui.testing.table_help"), "Small").pack(fill="x", pady=(px(self, 8), 0))
         right = self.card(parent=columns)
         columns.add(right)
         head = frame(right.body)
@@ -915,7 +932,7 @@ class TestingPage(Page):
         self._buttons = self.actions()
         self._btn_test = button(self._buttons, t("gui.testing.test"), self._on_test, kind="primary")
         self._btn_use = button(self._buttons, t("gui.testing.use"), self._on_use)
-        self._btn_refine = button(self._buttons, t("gui.testing.refine"), self._on_refine)
+        self._btn_refine = button(self._buttons, t("gui.testing.refine"), self._on_refine, kind="ghost")
         self._btn_restore = button(self._buttons, t("gui.testing.restore"), self._on_restore, kind="ghost")
         if not s.can_measure:
             self._btn_use.configure(style="Primary.TButton")
@@ -1203,11 +1220,13 @@ class LaunchContext:
 
 
 class ResultsView(ttk.Frame):
-    """The result screen body: hero card, before/after bars, area preview, filter chain.
+    """The result screen body: hero card (what changes, the actions), before/after bars and the area preview.
+
+    Everything else is folded under "More details": the exact filter chain, the community comparison, the
+    plugin suggestions, extra sections and, in Advanced mode, the full report and the log.
 
     Extra cards go through :meth:`add_section` (directly, or by appending a hook
-    to :data:`RESULT_SECTIONS`). They are placed in ``sections``, between the
-    comparison and the technical details.
+    to :data:`RESULT_SECTIONS`). They are placed in ``sections``, inside "More details".
     """
 
     def __init__(self, parent: Page, session: Session, best: Candidate) -> None:
@@ -1217,15 +1236,16 @@ class ResultsView(ttk.Frame):
         self.status = Notice(self)
         self.status.pack(fill="x", pady=(0, parent.gap()))
         self._build_comparison()
-        columns = Columns(self, breakpoint=px(self, 820))
-        columns.pack(fill="x")
-        area_card = self._build_area(columns)
+        area_card = self._build_area(self)
         if area_card is not None:
-            columns.add(area_card)
-        columns.add(self._build_filters(columns))
+            area_card.pack(fill="x", pady=(0, parent.gap()))
+        self.details = Expander(self, t("gui.result.more_details"), widgets=True)
+        self.details.pack(fill="x")
+        more = self.details.content
+        self._build_filters(more).pack(fill="x", pady=(px(self, 4), parent.gap()))
         # ---- EXTENSION POINT: cards added with add_section() live here --------
         # Built-in sections first (community comparison, plugin suggestions), then RESULT_SECTIONS.
-        self.sections = ttk.Frame(self)
+        self.sections = ttk.Frame(more)
         self.sections.pack(fill="x")
         self.builtin_sections: list[Card] = []
         for builtin in (self._build_community, self._build_suggestions):
@@ -1234,8 +1254,11 @@ class ResultsView(ttk.Frame):
                 self.builtin_sections.append(card)
         for hook in RESULT_SECTIONS:
             hook(self)
-        self.report = Expander(self, t("gui.result.full_report"), height=14)
-        self.log = Expander(self)
+        copy = button(more, t("gui.result.copy"), self.page._on_copy, kind="ghost")
+        copy.pack(anchor="w")
+        self.buttons.append(copy)
+        self.report = Expander(more, t("gui.result.full_report"), height=14)
+        self.log = Expander(more)
         if parent.session.advanced:      # the technical report and log are Advanced-mode content
             self.report.pack(fill="x", pady=(px(self, 4), 0))
             self.log.pack(fill="x")
@@ -1307,9 +1330,8 @@ class ResultsView(ttk.Frame):
         hero = Card(self, accent=COLORS.accent, padding=22)
         hero.pack(fill="x", pady=(0, gap()))
         body = hero.body
-        label(body, t("gui.result.eyebrow"), "Eyebrow").pack(anchor="w")
         top = frame(body)
-        top.pack(fill="x", pady=(px(self, 2), px(self, 4)))
+        top.pack(fill="x", pady=(0, px(self, 4)))
         label(top, candidate_label(s, best), "Title").pack(side="left")
         result = s.results.get(best.id)
         chips = frame(top)
@@ -1325,28 +1347,10 @@ class ResultsView(ttk.Frame):
         changes = describe_changes(s.profile, best.changes, self._label_of, best.est_added_latency_ms,
                                    detail=True)
         bullets(body, [t(key, **params) for key, params in changes]).pack(fill="x")
-        if best.reasons:
-            label(body, t("gui.result.why_title"), "Strong").pack(anchor="w", pady=(px(self, 14), px(self, 4)))
-            reasons = [tr(reason) for reason in best.reasons]
-            bullets(body, reasons[:_SHOWN_REASONS], role="Muted").pack(fill="x")
-            if len(reasons) > _SHOWN_REASONS:
-                more = bullets(body, reasons[_SHOWN_REASONS:], role="Muted")
-                hidden = len(reasons) - _SHOWN_REASONS
-                toggle = button(body, t("gui.result.more_reasons", n=hidden), lambda: None, kind="ghost",
-                                icon="chevron_right")
-                toggle.pack(anchor="w", pady=(px(self, 2), 0))
-
-                def flip() -> None:
-                    if more.winfo_manager():
-                        more.pack_forget()
-                        toggle.configure(text=t("gui.result.more_reasons", n=hidden))
-                        toggle.set_icon("chevron_right")
-                    else:
-                        more.pack(fill="x", before=toggle)
-                        toggle.configure(text=t("gui.result.fewer_reasons"))
-                        toggle.set_icon("chevron_down")
-
-                toggle.configure(command=flip)
+        if best.reasons:       # why, in the engine's words: folded, the changes above already say what happens
+            why = Expander(body, t("gui.result.why_title"), widgets=True)
+            why.pack(fill="x", pady=(px(self, 10), 0))
+            bullets(why.content, [tr(reason) for reason in best.reasons], role="Muted").pack(fill="x")
         if s.dry_run:
             WrapLabel(body, t("gui.result.dry_run_note"), "Small").pack(fill="x", pady=(px(self, 12), 0))
         # main actions first; the quieter ones get their own row so nothing is clipped on narrow windows
@@ -1358,13 +1362,8 @@ class ResultsView(ttk.Frame):
             self.buttons.append(button(row, t("gui.result.save_preset"), self.page._on_preset))
         else:
             self.buttons.append(button(row, t("gui.result.save_preset"), self.page._on_preset, kind="primary"))
-        target = s.output_dir or (s.config_dir / "Presets" if s.config_dir else None)
-        if target is not None:
-            WrapLabel(body, t("gui.result.save_where", path=str(target)), "Small").pack(
-                fill="x", pady=(px(self, 8), 0))
         more = frame(body)
         more.pack(fill="x", pady=(px(self, 10), 0))
-        self.buttons.append(button(more, t("gui.result.copy"), self.page._on_copy, kind="ghost"))
         if s.can_measure:
             self.buttons.append(button(more, t("gui.result.restore"), self.page._on_restore, kind="ghost"))
         self.companion_button: ttk.Button | None = None
@@ -1383,7 +1382,7 @@ class ResultsView(ttk.Frame):
     def _build_comparison(self) -> None:
         rows = comparison_for(self.session, self.best)
         box = Card(self, t("gui.compare.title"), t("gui.compare.subtitle"))
-        InfoTip(box.header, t("gui.tip.jitter") + "\n\n" + t("gui.tip.latency")).pack(
+        InfoTip(box.header, "\n\n".join(t(k) for k in ("gui.compare.note", "gui.tip.jitter", "gui.tip.latency"))).pack(
             side="left", padx=(px(self, 8), 0))
         box.pack(fill="x", pady=(0, self.page.gap()))
         if not any(r.before is not None or r.after is not None for r in rows):
@@ -1392,7 +1391,6 @@ class ResultsView(ttk.Frame):
         chart = BarChart(box.body, t("gui.compare.before"), t("gui.compare.after"), t("gui.compare.missing"))
         chart.pack(fill="x")
         chart.set_rows(rows)
-        WrapLabel(box.body, t("gui.compare.note"), "Small").pack(fill="x", pady=(px(self, 6), 0))
 
     def _build_area(self, parent: tk.Misc) -> Card | None:
         s, best = self.session, self.best
@@ -1664,24 +1662,25 @@ class SettingsDialog(tk.Toplevel):
         self.policy = tk.StringVar(value=self.session.prefs.plugin_policy.value)
         for policy in PluginPolicy:
             radio(pol.body, t(f"core.pref.plugin_policy.{policy.value}"), policy.value, self.policy).pack(anchor="w")
-        upd = Card(body, t("gui.settings.update_title"), t("gui.settings.update_help"))
-        upd.pack(fill="x", pady=(0, px(self, 12)))
-        self.on_start = tk.BooleanVar(value=cfg.check_updates_on_start)
-        check(upd.body, t("gui.settings.check_on_start"), self.on_start).pack(anchor="w")
-        label(upd.body, t("gui.settings.update_url"), "Strong").pack(anchor="w", pady=(px(self, 8), 2))
-        self.url = tk.StringVar(value=cfg.update_url)
-        ttk.Entry(upd.body, textvariable=self.url).pack(fill="x")
         prof = Card(body, t("gui.settings.profile_title"), t("gui.settings.profile_help"))
         prof.pack(fill="x", pady=(0, px(self, 12)))
         self._profile_button = button(prof.body, t("gui.settings.profile_forget"), self._forget_profile, kind="secondary")
         self._profile_button.pack(anchor="w")
         if self.session.profile_store is None or not self.session.profile_store.profiles:
             self._profile_button.configure(state="disabled")
-        ledger = Card(body, t("gui.settings.ledger_title"), t("gui.settings.ledger_help"))
-        ledger.pack(fill="x", pady=(0, px(self, 12)))
-        WrapLabel(ledger.body, ledger_text(t, cfg.effective_click_keys), "Small").pack(fill="x")
+        ledger = Expander(prof.body, t("gui.settings.ledger_title"), height=9)
+        ledger.pack(fill="x", pady=(px(self, 8), 0))
+        ledger.set(ledger_text(t, cfg.effective_click_keys))
+        # community data: status and "Update", the start-up check, the update address folded
         self.data = DataCard(body, wizard, settings_button=False)
         self.data.pack(fill="x", pady=(0, px(self, 12)))
+        self.on_start = tk.BooleanVar(value=cfg.check_updates_on_start)
+        check(self.data.body, t("gui.settings.check_on_start"), self.on_start).pack(anchor="w", pady=(px(self, 8), 0))
+        source = Expander(self.data.body, t("gui.settings.update_url"), widgets=True)
+        source.pack(fill="x", pady=(px(self, 4), 0))
+        self.url = tk.StringVar(value=cfg.update_url)
+        ttk.Entry(source.content, textvariable=self.url).pack(fill="x")
+        WrapLabel(source.content, t("gui.settings.update_help"), "Small").pack(fill="x", pady=(px(self, 2), 0))
         self.message = Notice(body)
         self.message.pack(fill="x")
         actions = frame(body)

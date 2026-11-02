@@ -23,6 +23,37 @@ icons or filler text. Real screenshots (100 % scaling in Spanish, plus one in En
 | Icons | none as text glyphs; the few that carry meaning (notice kinds, check marks, chevrons, the "best option" dot, the logo) are drawn as small antialiased bitmaps |
 | Title bar | dark on Windows 10 20H1+ / 11 (`DwmSetWindowAttribute`, attribute 20, falling back to 19; best effort, no-op elsewhere) |
 
+## Simplicity: what a screen shows by default
+
+Progressive disclosure. A screen shows what a normal player needs to make its one decision; everything
+else is still there, one click away, in a fold (`Expander`) or behind a "?" (`InfoTip`). Nothing is
+removed to make a screen shorter: it is moved.
+
+1. **One decision, one primary action.** The content of a screen has a single pink (primary) button
+   (the wizard's Next in the footer is the way on); in the baseline step only the next test still to
+   do is pink. Secondary actions are at most two plain buttons; quieter ones (restore, copy, refine,
+   check with a replay) are ghost buttons.
+2. **Visible by default:** the question or result itself, the choices, the main action, and anything
+   that needs the player's attention now (errors, unsaved changes, a proposal to accept or skip).
+3. **Folded by default:** exact numbers and tables (filter chain, live values, alignment and cost
+   figures, round lists), alternative routes (choose folders by hand, a tablet that is not listed, a
+   second monitor, plugin policy), the engine's reasons ("Why"), privacy details, comparisons with the
+   community. A fold that holds a choice the player made stays open across refreshes.
+4. **Behind a "?":** why a question is asked, and what a term means (area, jitter, latency, report
+   rate). Questions show their title and choices only.
+5. **No duplicates.** If two cards say the same thing, keep one (the hero card's list of changes makes
+   the filter table a detail; the progress chips replace the "rounds played" line; the probe outcome is
+   the first line of "What we found", not a card of its own).
+6. **Advanced mode** (header toggle) adds the purely technical parts: full text report, log,
+   community data on the welcome screen.
+7. **Text.** Short, plain sentences; one idea per line; no filler or sales words ("powerful",
+   "smart", "optimise your experience"), no exclamation marks, no emoji, no capitals for emphasis.
+   Name things the way the rest of the app does ("Live tuning", never "companion mode"). Spanish and
+   English carry the same keys and the same tone.
+
+How to check it: build the screens hidden (as the tests do) and compare visible words, primary buttons
+and page height with the previous version; open every fold and check nothing overflows the window.
+
 ## Tokens: where to tune the look
 
 * **Colours** — `osu_tablet_assistant/gui/palette.py`. Change `GROUND`, `TINT` (the cool white the
@@ -114,6 +145,16 @@ Interfaz tranquila y profesional: paneles redondeados tipo cristal sobre un fond
 oscuro, un solo color de acento (rosa osu!) usado con moderación, sin iconos decorativos ni textos de
 relleno. Las capturas reales están en [`docs/screenshots`](screenshots).
 
+* **Simplicidad (divulgación progresiva)**: cada pantalla muestra lo necesario para una sola decisión,
+  con un único botón principal (rosa) en su contenido (el "Siguiente" del pie es el avance) y como
+  mucho dos secundarios. Lo demás sigue disponible, plegado
+  (`Expander`) o detrás de un "?" (`InfoTip`): números exactos y tablas (cadena de filtros, valores
+  activos, rondas, datos de alineación), caminos alternativos (carpetas a mano, tableta que no está en
+  la lista, otro monitor, plugins), los motivos ("Por qué"), la privacidad y la comparación con la
+  comunidad. El porqué de cada pregunta y las definiciones van en el "?". Nada se repite en dos
+  tarjetas. El modo avanzado añade solo lo técnico (informe completo, registro, datos de la comunidad).
+  Textos cortos y llanos, sin relleno ni frases de anuncio, sin exclamaciones, emojis ni mayúsculas de
+  énfasis, y los mismos nombres en toda la app ("Ajuste en vivo", no "modo acompañante").
 * **Dónde ajustar**: colores en `gui/palette.py` (`GROUND`, `TINT`, `ACCENT`, `GLASS`); tamaños,
   radios y tipografía al principio de `gui/widgets.py` (`SPACE`, `RADIUS`, `FONT_ROLES`,
   `FONT_FACES`). `tests/test_design.py` comprueba el contraste WCAG de cada combinación.
