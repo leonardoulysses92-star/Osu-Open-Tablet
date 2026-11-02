@@ -11,6 +11,10 @@ gratuito y de código abierto que se usa en lugar del driver del fabricante.
 
 ![Pantalla de prueba de ajustes](docs/screenshots/08-testing-es.png)
 
+![Resultado de la configuración guiada](docs/screenshots/09-result-es.png)
+
+![Informe del coach de partidas](docs/screenshots/18-coach-report-es.png)
+
 ## Qué hace
 
 Al abrirlo eliges uno de tres caminos:

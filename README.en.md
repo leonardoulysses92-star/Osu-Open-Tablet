@@ -11,6 +11,10 @@ driver used instead of the manufacturer's driver.
 
 ![Settings test screen](docs/screenshots/08-testing-en-125.png)
 
+![Result of the guided setup](docs/screenshots/09-result-en-125.png)
+
+![Play coach report](docs/screenshots/18-coach-report-en-125.png)
+
 ## What it does
 
 When it opens you pick one of three paths:
