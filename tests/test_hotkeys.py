@@ -183,12 +183,13 @@ class ManagerTest(unittest.TestCase):
         self.assertEqual(sorted(mgr.conflicts), ["responsive", "smoother"])
         mgr.stop()
 
-    def test_rebind_resolves_a_conflict(self) -> None:
+    def test_new_bindings_resolve_a_conflict(self) -> None:
         backend = FakeBackend(taken={"ctrl+alt+up"})
         got: list[str] = []
         mgr = hk.HotkeyManager(hk.DEFAULT_BINDINGS, got.append, backend=backend)
         mgr.start()
-        status = mgr.rebind({**hk.DEFAULT_BINDINGS, "smoother": "ctrl+shift+up"})
+        mgr.set_bindings({**hk.DEFAULT_BINDINGS, "smoother": "ctrl+shift+up"})
+        status = mgr.start()
         self.assertTrue(status["smoother"])
         self.assertEqual(mgr.conflicts, [])
         backend.press("ctrl+shift+up")

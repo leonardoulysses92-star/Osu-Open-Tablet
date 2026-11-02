@@ -29,6 +29,8 @@ def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     from .appconfig import app_data_dir, load_config
     app_dir = app_data_dir()
+    from .log import setup as setup_log
+    setup_log(app_dir)
     i18n.set_language(args.lang or load_config(app_dir / "config.json").language)
     try:
         import tkinter

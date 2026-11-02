@@ -52,10 +52,6 @@ class AlignmentTests(unittest.TestCase):
         self.assertFalse(report.trusted)
         self.assertIn("play.warn.align_low", [w.key for w in report.warnings])
 
-    def test_estimate_alignment_matches_the_report(self) -> None:
-        capture, report = analyze(Player(), seed=1)
-        self.assertEqual(po.estimate_alignment(MAP, capture).offset_ms, report.alignment.offset_ms)
-
 
 class JudgingTests(unittest.TestCase):
     def test_clean_player_has_no_false_alarms(self) -> None:

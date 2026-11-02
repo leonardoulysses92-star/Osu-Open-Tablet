@@ -31,6 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from ..models import FilterConfig, ProfileChanges, ProfileInfo, Rect
+from . import winproc
 
 SETTINGS_FILE = "settings.json"
 PRESETS_DIR = "Presets"
@@ -153,40 +154,11 @@ def _running_daemon_dirs() -> Iterable[Path]:
     """Folders of running ``OpenTabletDriver.Daemon.exe`` processes (Windows, read-only)."""
     if sys.platform != "win32":
         return []
-    import ctypes
-    from ctypes import wintypes
-
-    class ProcessEntry(ctypes.Structure):
-        _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD),
-                    ("th32ProcessID", wintypes.DWORD), ("th32DefaultHeapID", ctypes.c_size_t),
-                    ("th32ModuleID", wintypes.DWORD), ("cntThreads", wintypes.DWORD),
-                    ("th32ParentProcessID", wintypes.DWORD), ("pcPriClassBase", wintypes.LONG),
-                    ("dwFlags", wintypes.DWORD), ("szExeFile", wintypes.WCHAR * 260)]
-
-    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    k32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
-    k32.OpenProcess.restype = wintypes.HANDLE
-    snap = k32.CreateToolhelp32Snapshot(0x2, 0)   # TH32CS_SNAPPROCESS
-    if not snap or snap == wintypes.HANDLE(-1).value:
-        return []
-    dirs: list[Path] = []
     try:
-        entry = ProcessEntry()
-        entry.dwSize = ctypes.sizeof(ProcessEntry)
-        ok = k32.Process32FirstW(snap, ctypes.byref(entry))
-        while ok:
-            if entry.szExeFile.lower() == "opentabletdriver.daemon.exe":
-                proc = k32.OpenProcess(0x1000, False, entry.th32ProcessID)  # QUERY_LIMITED_INFORMATION
-                if proc:
-                    buf = ctypes.create_unicode_buffer(32768)
-                    size = wintypes.DWORD(len(buf))
-                    if k32.QueryFullProcessImageNameW(proc, 0, buf, ctypes.byref(size)):
-                        dirs.append(Path(buf.value).parent)
-                    k32.CloseHandle(proc)
-            ok = k32.Process32NextW(snap, ctypes.byref(entry))
-    finally:
-        k32.CloseHandle(snap)
-    return dirs
+        procs = winproc.processes_with_paths({daemon_exe_name("Windows")})
+    except OSError:
+        return []
+    return [Path(path).parent for _pid, _name, path in procs if path]
 
 
 # --------------------------------------------------------------------------

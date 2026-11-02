@@ -29,7 +29,6 @@ class FormatGenerationTests(unittest.TestCase):
         first, second, third = db.entries
         self.assertEqual(first.key, "Artist - Song [Hard]")
         self.assertEqual((second.artist, second.title, second.title_unicode), ("xi", "Blue Zenith", "ブルーゼニス"))
-        self.assertEqual(second.key_unicode, "xi - ブルーゼニス [FOUR DIMENSIONS]")
         self.assertEqual(second.folder, "2 xi - Blue Zenith")
         self.assertEqual(second.osu_file, "xi - Blue Zenith (Asphyxia) [FOUR DIMENSIONS].osu")
         self.assertEqual(second.md5, ("abcdef" + "1" * 26))                     # lower case for lookups

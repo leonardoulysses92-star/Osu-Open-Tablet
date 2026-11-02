@@ -16,7 +16,7 @@
 
 - Se descartaron las entradas que parecen erratas o valores sin tocar: ChocoPafe (radio interior mayor que el exterior) y Exxotl (valores por defecto con una zona muerta de 1 mm).
 - Se marcaron, y se muestran como avisos, las que dejan dudas: "posible errata", "valores del formulario", "antigua", "depende de la tableta".
-- Los valores aportados por el autor del proyecto (Radial Follow 0,71 / 0,37 / 0,37 / 0,38 / 0,26, área desconocida) están como "valores propios", sin verificar, con confianza baja y sin atribuirse a ningún jugador: la investigación no encontró ninguna fuente pública que los relacione con mrekk.
+- Los valores aportados por el autor del proyecto (Radial Follow 0,71 / 0,37 / 0,37 / 0,38 / 0,26, área desconocida) están como "valores propios", sin verificar, con confianza baja y sin atribuirse a ningún jugador: no se encontró ninguna fuente pública que los relacione con mrekk.
 
 ## Adaptación al área del jugador
 

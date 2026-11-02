@@ -1,7 +1,4 @@
 {
-  "engine.confidence.high": "Confianza alta (verificado con el código del plugin)",
-  "engine.confidence.medium": "Confianza media (documentado en parte)",
-  "engine.confidence.low": "Confianza baja (poca documentación, en parte estimado)",
 
   "engine.candidate.no-filter.label": "Sin filtros (referencia)",
   "engine.candidate.no-filter.summary": "Tu tableta tal cual, sin filtros. Sirve de referencia para comparar todo lo demás.",

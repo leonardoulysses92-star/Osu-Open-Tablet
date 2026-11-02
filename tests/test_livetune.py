@@ -390,10 +390,6 @@ class OsuDetectionTest(unittest.TestCase):
         self.assertEqual(lt.find_osu([stable, lazer]).pid, 11)
         self.assertIsNone(lt.find_osu([lt.ProcessEntry(1, "explorer.exe")]))
 
-    def test_is_osu_running_with_fake_lister(self) -> None:
-        self.assertTrue(lt.is_osu_running(lambda: [lt.ProcessEntry(5, "osu!.exe")]))
-        self.assertFalse(lt.is_osu_running(lambda: []))
-
     def test_parse_tasklist(self) -> None:
         text = '"System Idle Process","0","Services","0","8 K"\n"osu!.exe","4242","Console","1","300,000 K"\n'
         procs = lt.parse_tasklist_csv(text)

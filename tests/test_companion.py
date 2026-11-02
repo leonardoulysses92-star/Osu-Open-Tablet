@@ -16,7 +16,7 @@ from osu_tablet_assistant.engine.adapt import PolicyMode
 from osu_tablet_assistant.engine.recommend import RADIAL_TABLET
 from osu_tablet_assistant.gui import companion as comp
 from osu_tablet_assistant.gui import hotkeys as hk
-from osu_tablet_assistant.gui import i18n
+from osu_tablet_assistant.gui import i18n, winutil
 from osu_tablet_assistant.models import (ApplyResult, Candidate, DisplaySpec, PenSample, ProfileChanges, Reason,
                                          Rect, TabletSpec)
 from osu_tablet_assistant.otd import livetune as lt
@@ -270,13 +270,13 @@ class SessionAdapterTest(unittest.TestCase):
                                   applied=None, live_candidate_id="c1", candidate=lambda cid: cand,
                                   services=services, tablet=CTL472, display=DISPLAY, install_dir=None,
                                   config_dir=Path("C:/cfg"), filter_paths={RADIAL_TABLET}, dry_run=False)
-        args = comp.companion_args_from_session(session)
+        args = winutil.companion_args_from_session(session)
         self.assertEqual(args["tablet_name"], "Wacom CTL-472")
         self.assertEqual(args["settings"]["Profiles"][0]["AbsoluteModeSettings"]["Tablet"]["Width"], 70.0)
         self.assertEqual(args["controller"], "controller")
         self.assertEqual(args["available_filters"], {RADIAL_TABLET})
         session.live_candidate_id = None
-        self.assertEqual(comp.companion_args_from_session(session)["settings"], user_settings())
+        self.assertEqual(winutil.companion_args_from_session(session)["settings"], user_settings())
 
 
 class LocaleKeysTest(unittest.TestCase):

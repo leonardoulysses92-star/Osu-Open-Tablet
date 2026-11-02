@@ -380,7 +380,7 @@ def convergence(state: OptimizerState) -> Convergence:
 class RoundProposal:
     """What to do next. ``kind`` is shift | scale | rotate | filter | revert | probe | probe_back | none.
 
-    ``rule`` / ``sources``: the rulebook rule (and the research sources) behind a rule-based proposal;
+    ``rule`` / ``sources``: the rulebook rule (and its sources) behind a rule-based proposal;
     ``rule_filter`` is its one filter change (path, new store or None to take it out), to apply on what is live.
 
     ``probe`` is an area trial (``new_probe`` carries the trial state to hand back to ``record_round``);
@@ -774,7 +774,7 @@ def _rule_stage(state: OptimizerState, profile: ProfileInfo, tablet: TabletSpec 
 
 def rule_proposal(state: OptimizerState, profile: ProfileInfo, suggestion: Any, tablet: TabletSpec | None,
                   aspect_lock: bool = True) -> RoundProposal | None:
-    """A ``rulebook.Suggestion`` as a proposal: the rule's step (already within the research caps) times the trust
+    """A ``rulebook.Suggestion`` as a proposal: the rule's step (already within the rulebook's caps) times the trust
     region, bounded to the tablet, never a movement that was just undone. None when nothing would move."""
     area = profile.tablet_area
     lead = (suggestion.reason,)

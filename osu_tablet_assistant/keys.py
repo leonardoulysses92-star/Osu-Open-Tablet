@@ -1,4 +1,5 @@
 """Click-key names the Play Coach understands, their Windows virtual-key codes, and the player's choice.
+Also the text form of the companion's global hotkeys (parsing, defaults, validation of saved bindings).
 
 Pure module (no Tk, no Windows calls), shared by the recorder (``gui.playwatch``), the coach and the config.
 
@@ -18,7 +19,7 @@ from __future__ import annotations
 import os
 import re
 from dataclasses import dataclass
-from typing import Any, Iterable, Sequence
+from typing import Any, Iterable, Mapping, Sequence
 
 DEFAULT_CLICK_KEYS: tuple[str, ...] = ("z", "x")
 PEN_TIP_KEY = "mouse1"
@@ -243,3 +244,96 @@ class KeyChoice:
     def reset(self) -> "KeyChoice":
         """Back to Z and X, pen tip off."""
         return KeyChoice()
+
+
+# ------------------------------------------------------------ companion hotkeys
+# Text form of the companion's global hotkeys ("ctrl+alt+up"). Registering them is ``gui.hotkeys``' job;
+# the parsing lives here so the config can validate saved bindings without importing the GUI.
+MOD_ALT, MOD_CONTROL, MOD_SHIFT, MOD_WIN, MOD_NOREPEAT = 0x1, 0x2, 0x4, 0x8, 0x4000
+HOTKEY_MODIFIERS = {"ctrl": MOD_CONTROL, "control": MOD_CONTROL, "alt": MOD_ALT, "shift": MOD_SHIFT,
+                    "win": MOD_WIN}
+HOTKEY_VK: dict[str, int] = {
+    "up": 0x26, "down": 0x28, "left": 0x25, "right": 0x27, "pageup": 0x21, "pagedown": 0x22,
+    "home": 0x24, "end": 0x23, "insert": 0x2D, "delete": 0x2E, "space": 0x20, "enter": 0x0D,
+    "tab": 0x09, "backspace": 0x08, "plus": 0xBB, "minus": 0xBD, "comma": 0xBC, "period": 0xBE,
+    **{chr(c).lower(): c for c in range(ord("A"), ord("Z") + 1)},
+    **{str(d): 0x30 + d for d in range(10)},
+    **{f"num{d}": 0x60 + d for d in range(10)},
+    **{f"f{n}": 0x6F + n for n in range(1, 25)},
+}
+HOTKEY_ACTIONS = ("smoother", "responsive", "precise", "looser", "area_bigger", "area_smaller", "undo", "keep",
+                  "step")
+DEFAULT_BINDINGS: dict[str, str] = {
+    "smoother": "ctrl+alt+up", "responsive": "ctrl+alt+down",
+    "precise": "ctrl+alt+left", "looser": "ctrl+alt+right",
+    "area_bigger": "ctrl+alt+pageup", "area_smaller": "ctrl+alt+pagedown",
+    "undo": "ctrl+alt+z", "keep": "ctrl+alt+k",
+    "step": "ctrl+alt+p",            # cycles the step size: normal -> fine -> very fine ("Paso")
+}
+MAX_HOTKEY_TEXT = 40
+
+
+class HotkeyError(ValueError):
+    """A hotkey string could not be parsed."""
+
+
+@dataclass(frozen=True)
+class Hotkey:
+    modifiers: int
+    vk: int
+    text: str
+
+
+def parse_hotkey(text: str) -> Hotkey:
+    """"ctrl+alt+up" -> Hotkey. Needs at least one modifier and exactly one key."""
+    parts = [p.strip().lower() for p in str(text).replace(" ", "").split("+") if p.strip()]
+    mods, found = 0, []
+    for part in parts:
+        if part in HOTKEY_MODIFIERS:
+            mods |= HOTKEY_MODIFIERS[part]
+        elif part in HOTKEY_VK:
+            found.append(part)
+        else:
+            raise HotkeyError(f"unknown key {part!r} in {text!r}")
+    if len(found) != 1 or not mods:
+        raise HotkeyError(f"{text!r}: use modifier(s) + one key, e.g. ctrl+alt+up")
+    names = [n for n, m in (("ctrl", MOD_CONTROL), ("alt", MOD_ALT), ("shift", MOD_SHIFT), ("win", MOD_WIN))
+             if mods & m]
+    return Hotkey(mods, HOTKEY_VK[found[0]], "+".join(names + found))
+
+
+def clean_bindings(data: object) -> dict[str, str]:
+    """Bindings for every action from untrusted data (a saved config): never invalid, never duplicated.
+
+    Known actions with valid text keep it (normalised, e.g. "Alt+Ctrl+Up" -> "ctrl+alt+up"); "" means
+    "no hotkey". Missing or invalid entries get the default unless that combination is already taken,
+    in which case the action stays without a hotkey.
+    """
+    given = data if isinstance(data, Mapping) else {}
+    out: dict[str, str] = {}
+    used: set[tuple[int, int]] = set()
+
+    def take(text: object) -> str | None:
+        if not isinstance(text, str) or len(text) > MAX_HOTKEY_TEXT:
+            return None
+        if not text.strip():
+            return ""
+        try:
+            hk = parse_hotkey(text)
+        except HotkeyError:
+            return None
+        if (hk.modifiers, hk.vk) in used:
+            return None
+        used.add((hk.modifiers, hk.vk))
+        return hk.text
+
+    pending = []
+    for action in HOTKEY_ACTIONS:      # the user's own choices first, so a default never pushes them out
+        value = take(given.get(action)) if action in given else None
+        if value is None:
+            pending.append(action)
+        else:
+            out[action] = value
+    for action in pending:
+        out[action] = take(DEFAULT_BINDINGS[action]) or ""
+    return {a: out[a] for a in HOTKEY_ACTIONS}

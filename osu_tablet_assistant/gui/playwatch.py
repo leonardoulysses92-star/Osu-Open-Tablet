@@ -56,7 +56,7 @@ def windows_key_source(keys: Sequence[str]) -> KeySource | None:
     try:
         import ctypes
 
-        get_state = ctypes.windll.user32.GetAsyncKeyState
+        get_state = ctypes.WinDLL("user32").GetAsyncKeyState    # own handle: the shared windll is never retyped
         get_state.argtypes = [ctypes.c_int]
         get_state.restype = ctypes.c_short
     except (AttributeError, OSError, ImportError):
@@ -83,7 +83,7 @@ def windows_window_lister() -> WindowLister | None:
         import ctypes
         from ctypes import wintypes
 
-        user32 = ctypes.windll.user32
+        user32 = ctypes.WinDLL("user32")          # own handle: the shared windll is never retyped
         callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
         user32.EnumWindows.argtypes = [callback_type, wintypes.LPARAM]
         user32.GetWindowTextLengthW.argtypes = [wintypes.HWND]

@@ -51,7 +51,7 @@ def windows_cursor_source() -> PositionSource | None:
         import ctypes
         from ctypes import wintypes
 
-        get_cursor_pos = ctypes.windll.user32.GetCursorPos
+        get_cursor_pos = ctypes.WinDLL("user32").GetCursorPos   # own handle: the shared windll is never retyped
         get_cursor_pos.argtypes = [ctypes.POINTER(wintypes.POINT)]
         get_cursor_pos.restype = wintypes.BOOL
     except (AttributeError, OSError, ImportError):
@@ -88,7 +88,7 @@ def windows_move_history() -> tuple[HistorySource, TickSource] | None:
         history.argtypes = [wintypes.UINT, ctypes.POINTER(MOUSEMOVEPOINT), ctypes.POINTER(MOUSEMOVEPOINT),
                             ctypes.c_int, wintypes.DWORD]
         history.restype = ctypes.c_int
-        tick = ctypes.windll.kernel32.GetTickCount
+        tick = ctypes.WinDLL("kernel32").GetTickCount
         tick.restype = wintypes.DWORD
     except (AttributeError, OSError, ImportError):
         return None
@@ -328,7 +328,7 @@ def windows_client_rect(pid: int) -> tuple[int, int, int, int] | None:
         import ctypes
         from ctypes import wintypes
 
-        user32 = ctypes.windll.user32
+        user32 = ctypes.WinDLL("user32")          # own handle: the shared windll is never retyped
         callback_type = ctypes.WINFUNCTYPE(wintypes.BOOL, wintypes.HWND, wintypes.LPARAM)
         user32.EnumWindows.argtypes = [callback_type, wintypes.LPARAM]
         user32.GetWindowThreadProcessId.argtypes = [wintypes.HWND, ctypes.POINTER(wintypes.DWORD)]

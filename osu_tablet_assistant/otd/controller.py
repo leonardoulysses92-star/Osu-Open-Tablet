@@ -34,6 +34,7 @@ from .settings_io import OtdSettingsError, console_exe_name, dumps_settings, sav
 
 PIPE_NAME = "OpenTabletDriver.Daemon"
 DEFAULT_PRESET_NAME = "osu-tablet-assistant"
+MAX_MESSAGE_BYTES = 16 * 1024 * 1024    # a settings document is tens of KB; refuse absurd lengths
 # Strings OTD 0.6.7 Console prints on failure (it still exits with code 0).
 CONSOLE_FAILURE_MARKERS = (
     "OpenTabletDriver Daemon not running",
@@ -111,6 +112,8 @@ def read_message(stream: BinaryIO) -> dict:
             length = int(value.strip())
     if length is None:
         raise RpcError(f"no Content-Length header in {header!r}")
+    if length > MAX_MESSAGE_BYTES:
+        raise RpcError(f"message too large ({length} bytes)")
     try:
         message = json.loads(_read_exact(stream, length).decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:

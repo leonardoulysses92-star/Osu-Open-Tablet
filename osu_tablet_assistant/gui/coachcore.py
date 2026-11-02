@@ -21,6 +21,7 @@ from ..engine.playobserve import ALIGN_TRUST, analyze_play
 from ..engine.playtypes import DEFAULT_DETAIL, Beatmap, Convergence, PlayCapture, PlayReport, grid_for
 from ..keys import DEFAULT_CLICK_KEYS, PEN_TIP_KEY, display_list, normalize_keys
 from ..knowledge.filters import FilterSpec, load_catalog
+from ..log import log_exception
 from ..models import DisplaySpec, FilterConfig, ProfileChanges, Reason, Rect, TabletSpec, UserPreferences
 from ..otd import settings_io
 from ..otd.livetune import LiveTuner, OsuWatcher
@@ -901,7 +902,8 @@ class CoachCore:
             from ..engine import community
             from ..knowledge import presets as kpresets
             return community.rank_presets(kpresets.load_presets().presets, self.tablet, self.area, self.profile)
-        except Exception:
+        except Exception:      # the presets only add a comparison; the round goes on without them
+            log_exception("ranking the community presets")
             return []
 
     def smoothing_ladder(self, path: str) -> "smoothing.Ladder | None":
@@ -1057,7 +1059,7 @@ class CoachCore:
 
     def _learn_habits(self, capture: PlayCapture, report: PlayReport, record, profile, from_replay: bool
                       ) -> tuple[rulebook.Suggestion, ...]:
-        """Measure this play's habits, keep them, and ask the rulebook what an experienced player would change.
+        """Measure this play's habits, keep them, and ask the rulebook which change fits them.
 
         Never breaks a round: anything unexpected means "no habits this time" (the other stages still run).
         """
@@ -1080,7 +1082,8 @@ class CoachCore:
             self.suggestions = tuple(rulebook.suggest(view, ctx))
             self.style = rulebook.describe(view, self.suggestions)
             self.habit_profile = prof
-        except Exception:
+        except Exception:      # the habit profile is extra advice: without it the round works as before
+            log_exception("the habit profile")
             self.habit_profile, self.suggestions, self.style = None, (), None
         return self.suggestions
 

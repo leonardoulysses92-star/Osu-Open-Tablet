@@ -28,9 +28,7 @@ or with explicit dependencies (all optional except settings/tablet_name)::
 """
 from __future__ import annotations
 
-import copy
 import queue
-import sys
 import time
 import tkinter as tk
 from collections.abc import Callable, Iterable, Mapping
@@ -43,6 +41,7 @@ from ..engine import adapt
 from ..engine.adapt import AdaptState, Intent, PolicyMode, Suggestion, TuningPolicy
 from ..engine.passive import PassiveMonitor
 from ..knowledge.filters import FilterSpec, load_catalog
+from ..log import log_exception
 from ..models import DisplaySpec, Reason, TabletSpec
 from ..otd.livetune import (LiveTuner, OsuWatcher, SendOutcome, controller_sender, dry_run_sender)
 from . import hotkeys as hk
@@ -50,6 +49,7 @@ from .i18n import t as default_t
 from .palette import COLORS, mix
 from .widgets import (FONT_FAMILY, Card, Expander, ScrollFrame, WrapLabel, apply_theme, button, check,
                       dark_title_bar, font, frame, label, px, radio, segmented, surface_color)
+from .winutil import companion_args_from_session, make_click_through
 
 BG, SURFACE, FG, MUTED, ACCENT, WARN = COLORS.bg, COLORS.surface, COLORS.text, COLORS.muted, COLORS.accent, COLORS.warn
 FONT = FONT_FAMILY
@@ -57,7 +57,6 @@ TICK_MS = 40
 SAMPLE_DRAIN_S = 0.5
 HINT_REFRESH_S = 2.0
 WATCH_INTERVAL_S = 3.0
-INTENT_ACTIONS = ("smoother", "responsive", "precise", "looser", "area_bigger", "area_smaller")
 
 Translate = Callable[..., str]
 
@@ -293,29 +292,6 @@ def overlay_lines(fb: Feedback, status: CompanionStatus, translate: Translate = 
 # --------------------------------------------------------------------------
 # Overlay
 # --------------------------------------------------------------------------
-WS_EX_TOPMOST, WS_EX_TRANSPARENT, WS_EX_TOOLWINDOW = 0x8, 0x20, 0x80
-WS_EX_LAYERED, WS_EX_NOACTIVATE = 0x80000, 0x08000000
-GWL_EXSTYLE = -20
-
-
-def make_click_through(win: tk.Misc) -> bool:
-    """Give a Tk toplevel the no-activate / tool / click-through / topmost ex-styles (Windows)."""
-    if sys.platform != "win32":
-        return False
-    try:
-        import ctypes
-        user32 = ctypes.windll.user32
-        hwnd = user32.GetParent(win.winfo_id()) or win.winfo_id()
-        style = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-        style |= WS_EX_TOPMOST | WS_EX_TRANSPARENT | WS_EX_TOOLWINDOW | WS_EX_LAYERED | WS_EX_NOACTIVATE
-        user32.SetWindowLongW(hwnd, GWL_EXSTYLE, style)
-        # HWND_TOPMOST, SWP_NOSIZE|SWP_NOMOVE|SWP_NOACTIVATE|SWP_FRAMECHANGED
-        user32.SetWindowPos(hwnd, -1, 0, 0, 0, 0, 0x1 | 0x2 | 0x10 | 0x20)
-        return True
-    except (AttributeError, OSError):
-        return False
-
-
 class Overlay:
     """Fading always-on-top status box. Stays mapped at alpha 0, so showing it never takes focus."""
 
@@ -818,7 +794,7 @@ class CompanionWindow:
             if self._persist is not None:
                 self._persist()
         except Exception:            # saving is a convenience: the choice still applies to this session
-            pass
+            log_exception("saving the assistant's settings")
 
     # --------------------------------------------------------------- actions
     def do(self, action: str) -> Feedback:
@@ -996,39 +972,6 @@ class CompanionWindow:
             pass
         if self.on_close is not None:
             self.on_close()
-
-
-def companion_args_from_session(session: Any) -> dict[str, Any]:
-    """Constructor arguments taken from a ``gui.session.Session`` (public attributes only).
-
-    The settings are the ones live in OTD right now: the applied final
-    settings, else the candidate currently under test, else the original.
-    """
-    base = getattr(session, "settings", None)
-    profile = getattr(session, "profile", None)
-    tablet_name = profile.tablet_name if profile is not None else None
-    live = base
-    try:
-        if getattr(session, "applied", None) is not None:
-            live = session.final_settings()
-        elif getattr(session, "live_candidate_id", None) and base is not None and tablet_name:
-            cand = session.candidate(session.live_candidate_id)
-            live = session.services.apply_changes(base, tablet_name, cand.changes)
-    except Exception:   # fall back to what was read from settings.json
-        live = base
-    services = getattr(session, "services", None)
-    controller = None
-    if services is not None and hasattr(services, "make_controller"):
-        try:
-            controller = services.make_controller(getattr(session, "install_dir", None),
-                                                  getattr(session, "config_dir", None))
-        except Exception:
-            controller = None
-    return {"settings": copy.deepcopy(live) if live is not None else None, "tablet_name": tablet_name,
-            "tablet": getattr(session, "tablet", None), "display": getattr(session, "display", None),
-            "controller": controller, "config_dir": getattr(session, "config_dir", None),
-            "available_filters": set(getattr(session, "filter_paths", ()) or ()),
-            "dry_run": bool(getattr(session, "dry_run", False))}
 
 
 def open_companion(parent: tk.Misc | None, session: Any = None, **kwargs: Any) -> CompanionWindow:

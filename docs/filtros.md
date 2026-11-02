@@ -12,7 +12,7 @@ El catálogo está en `osu_tablet_assistant/knowledge/filters.json` y se contras
 | Reconstructor, Spectral Reconstructor, Saturn Multifilter / HRRNC, Bezier Interpolator | No en las opciones estándar (avanzados). Se usan desde configuraciones de la comunidad o desde tu propio perfil |
 | Frenet-Serret predictor, ScuffedInter/Extrapolator, Hover Distance Limiter, Saturn Area Rounding | Nunca. Solo decides tú |
 
-Sobre el orden: en OTD 0.6 el orden de la lista `Filters` es el orden de ejecución, así que el asistente nunca reordena la cadena que ya tienes. En una cadena nueva se sigue la investigación: reducción de ruido primero, luego suavizado, luego remuestreo.
+Sobre el orden: en OTD 0.6 el orden de la lista `Filters` es el orden de ejecución, así que el asistente nunca reordena la cadena que ya tienes. En una cadena nueva se sigue el orden de [research/filters.md](research/filters.md): reducción de ruido primero, luego suavizado, luego remuestreo.
 
 Cambios de la última revisión del catálogo:
 

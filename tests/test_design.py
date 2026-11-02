@@ -11,18 +11,10 @@ from pathlib import Path
 from osu_tablet_assistant.gui import raster
 from osu_tablet_assistant.gui.palette import COLORS, contrast_ratio, mix, relative_luminance
 from osu_tablet_assistant.gui.widgets import NOTICE_KINDS, Chip, ImageCache
+from support import display_available
 
 PACKAGE = Path(__file__).resolve().parents[1] / "osu_tablet_assistant"
 SURFACES = ("bg", "field", "surface", "surface_2", "surface_3")
-
-
-def _display_available() -> bool:
-    try:
-        root = tk.Tk()
-    except tk.TclError:
-        return False
-    root.destroy()
-    return True
 
 
 class ContrastTests(unittest.TestCase):
@@ -145,7 +137,7 @@ class NoPictogramTests(unittest.TestCase):
                 self.assertEqual(_icon_chars(text, allowed="→"), set(), f"{path.parent.name}/{path.name}: {key}")
 
 
-@unittest.skipUnless(_display_available(), "no display")
+@unittest.skipUnless(display_available(), "no display")
 class RoundedFrameTests(unittest.TestCase):
     def make_root(self, scaling: float | None = None) -> tk.Tk:
         from osu_tablet_assistant.gui.widgets import apply_theme

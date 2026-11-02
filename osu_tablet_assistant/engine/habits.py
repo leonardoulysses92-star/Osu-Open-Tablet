@@ -13,7 +13,7 @@ Units. Spatial habits are in **circle radii** (``r``, the radius of this map's c
 so they compare across maps and area sizes; gains are fractions (+0.03 = the cursor travels 3 % too far),
 rotations degrees, times milliseconds. Errors are ``cursor - object`` in the player's view (x right, y down).
 
-Measured (research notes ``community-practice.md`` and ``pointer-and-map.md`` section 5):
+Measured (the rule numbers refer to ``engine.rulebook``):
 
 * **one joint fit** of the click errors (``aim_bias_*``, ``gain_*``, ``rotation``, ``edge_stop``)::
 
@@ -23,7 +23,7 @@ Measured (research notes ``community-practice.md`` and ``pointer-and-map.md`` se
   (zero for short moves), ``M = G - I`` a 2x2 matrix. ``a`` is the constant aim bias (the error at the centre),
   the diagonal of ``M`` the reach gain per axis (``gain_x`` > 0: overshoot horizontally -> a bigger area),
   ``(M21 - M12) / 2`` the rotation, and ``c`` a constant "stop at the circle edge" term along the jump that
-  does NOT grow with distance (research rule 2: the area is never changed for it). Weighted least squares,
+  does NOT grow with distance (rule 2: the area is never changed for it). Weighted least squares,
   streams weighted ``STREAM_WEIGHT`` (players flow through them instead of aiming at centres), one pass of
   outlier removal (``OUTLIER_SIGMAS``). Standard errors from ``sigma^2 (X'WX)^-1``;
 * ``overshoot`` (along-the-jump error vs jump distance, descriptive) and ``long_jump.<dir>`` (mean along
@@ -59,6 +59,7 @@ import statistics
 from dataclasses import dataclass
 from typing import Sequence
 
+from ..log import log_exception
 from ..models import Reason
 from . import areafit
 from .hotspots import place_id
@@ -92,6 +93,7 @@ HIGH_Z = 3.0              # ... and this far for "high" confidence
 MIN_N = 8                 # fewer samples: always "low"
 MEDIUM_N = 30
 HIGH_N = 100
+HIGH_PLAYS = 5            # pooled: "high" also needs this many plays (S20: 5 replays)
 # ------------------------------------------------------------- aim fit (heuristics)
 STREAM_GAP_MS = 180.0     # objects closer in time than this count as a stream ...
 STREAM_WEIGHT = 0.3       # ... and weigh this much in the aim fit (players flow through them)
@@ -162,7 +164,7 @@ def confidence(z: float, n: int, capped: bool = False, plays: int | None = None)
     if n < MIN_N or not z > SIG_Z:
         return "low"
     level = "high" if z >= HIGH_Z and n >= HIGH_N else "medium" if n >= MEDIUM_N else "low"
-    if level == "high" and (capped or (plays is not None and plays < 5)):
+    if level == "high" and (capped or (plays is not None and plays < HIGH_PLAYS)):
         level = "medium"
     return level
 
@@ -392,6 +394,7 @@ def analyze_habits(beatmap: Beatmap, capture: PlayCapture, report: PlayReport, m
     try:
         return _analyze(beatmap, capture, report, mods, from_replay)
     except Exception:            # a habit that cannot be measured must never break a round
+        log_exception("measuring habits")
         return HabitProfile(warnings=(Reason("play.style.warn.failed"),), from_replay=from_replay)
 
 

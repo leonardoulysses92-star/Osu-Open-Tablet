@@ -4,7 +4,7 @@ The file is plain ``Key = Value`` text next to ``osu!.exe``. Only the keys below
 (the user name, the password hash, ...) is skipped line by line and never kept. Reading it touches a FILE,
 never osu!'s memory.
 
-Why the coach cares (research note "pointer-and-map", section 1): the coach records the OS cursor. That is
+Why the coach cares: the coach records the OS cursor. That is
 osu!'s cursor only while osu! uses it unchanged. With **raw input** on and either **"map absolute raw input
 to the osu! window"** or a **sensitivity other than 1**, osu! computes its own cursor from the raw device data,
 and desktop pixels no longer map to the playfield by a fixed formula. A low **frame limit** makes osu!'s
@@ -23,6 +23,7 @@ from pathlib import Path
 from typing import Mapping
 
 from ..models import Reason
+from ..otd import winproc
 
 MAX_CFG_BYTES = 2 * 1024 * 1024
 LOW_FRAME_LIMIT_HZ = 200.0      # below this osu!'s positions can lag a fast jump by several osu! px (own estimate)
@@ -208,31 +209,7 @@ def process_image_path(pid: int | None) -> str | None:
 
     Opens the process with ``PROCESS_QUERY_LIMITED_INFORMATION`` only: it reads the path, nothing inside it.
     """
-    if os.name != "nt" or not pid:
-        return None
-    try:
-        import ctypes
-        from ctypes import wintypes
-
-        k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-        k32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
-        k32.OpenProcess.restype = wintypes.HANDLE
-        k32.QueryFullProcessImageNameW.argtypes = [wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR,
-                                                   ctypes.POINTER(wintypes.DWORD)]
-        k32.CloseHandle.argtypes = [wintypes.HANDLE]
-        handle = k32.OpenProcess(0x1000, False, int(pid))     # PROCESS_QUERY_LIMITED_INFORMATION
-        if not handle:
-            return None
-        try:
-            buf = ctypes.create_unicode_buffer(32768)
-            size = wintypes.DWORD(len(buf))
-            if not k32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
-                return None
-            return buf.value or None
-        finally:
-            k32.CloseHandle(handle)
-    except (AttributeError, OSError, ImportError, ValueError):
-        return None
+    return winproc.image_path(pid)
 
 
 def locate_osu_dir(configured: str | Path | None = None, process_path: str | Path | None = None,

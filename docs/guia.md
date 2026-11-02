@@ -63,10 +63,22 @@ En Ajustes eliges tu carpeta de salida (por ejemplo la de un OTD portable). Lo q
 | `settings.json` | `<config>\settings.json` | Solo con "Aplicar a OpenTabletDriver" |
 | Ajustes de prueba | Memoria del daemon de OTD | Durante las pruebas; no se escriben a disco |
 | Ajustes del asistente y datos descargados | `%APPDATA%\OsuOpenTablet\` | Al cambiar ajustes o actualizar datos |
+| Registro de errores (`osu-open-tablet.log`, máximo unos 256 KB más una copia anterior) | `%APPDATA%\OsuOpenTablet\` | Cuando el programa se recupera solo de un error; no se envía a ningún sitio |
 
 `%APPDATA%\OsuOpenTablet\config.json` guarda idioma, carpeta, nombre de archivo, política de plugins y actualizaciones. Si se daña, se usan los valores por defecto y la copia dañada queda como `config.corrupt.json`.
 
 OTD portable: además de `%LOCALAPPDATA%\OpenTabletDriver`, se reconocen carpetas con `OpenTabletDriver.Daemon.exe` o `convert_to_portable.bat` junto a un archivo de configuración o una carpeta `userdata`. Si hay varias, el paso 2 deja elegir.
+
+## Opciones al arrancar
+
+`run.bat` y `py -3 -m osu_tablet_assistant` aceptan:
+
+| Opción | Efecto |
+|---|---|
+| `--lang es` o `--lang en` | Idioma de la interfaz. Por defecto, el último usado. |
+| `--config-dir RUTA` | Carpeta de configuración de OTD (la que tiene `settings.json`). |
+| `--install-dir RUTA` | Carpeta del programa de OTD (la que tiene `OpenTabletDriver.Daemon.exe`). |
+| `--dry-run` | No aplica nada a OTD; solo deja guardar el archivo y el informe. |
 
 ## Confirmaciones y cómo deshacer
 
@@ -74,6 +86,6 @@ Hay que confirmar antes de la primera prueba que aplica ajustes, antes de aplica
 
 Para deshacer:
 
-1. "Restaurar mi configuración" en la app, o
+1. "Restaurar mis ajustes originales" en la app, o
 2. cargar un preset o archivo guardado en OTD, o
 3. con OTD cerrado, copiar la copia de `Backup\` encima de `settings.json`.

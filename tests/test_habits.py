@@ -19,6 +19,7 @@ from osu_tablet_assistant.engine.recommend import HAWKU, RADIAL_TABLET, RESAMPLE
 from osu_tablet_assistant.knowledge.filters import load_catalog
 from osu_tablet_assistant.models import FilterConfig, ProfileInfo
 from playsim import AREA, TABLET, Player, make_map, simulate
+from support import display_available
 
 MAP = make_map(seed=3, n=200, gap_ms=300)
 CATALOG = load_catalog()
@@ -351,15 +352,6 @@ class WordingTests(unittest.TestCase):
                     self.assertNotIn(word, text, f"{lang}:{key}")
 
 
-def _display_available() -> bool:
-    try:
-        root = tk.Tk()
-    except tk.TclError:
-        return False
-    root.destroy()
-    return True
-
-
 class CoachHabitTests(unittest.TestCase):
     def test_rounds_build_the_style_and_forget_clears_it(self) -> None:
         from test_coach import Env
@@ -376,7 +368,7 @@ class CoachHabitTests(unittest.TestCase):
         self.assertEqual((env.core.habit_store.plays, env.core.style.plays), ([], 0))
 
 
-@unittest.skipUnless(_display_available(), "no display")
+@unittest.skipUnless(display_available(), "no display")
 class StyleCardTests(unittest.TestCase):
     def test_card_in_both_languages(self) -> None:
         from osu_tablet_assistant.gui import i18n, stylecard

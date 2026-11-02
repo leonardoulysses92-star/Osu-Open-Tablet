@@ -1,8 +1,7 @@
 """Shared data contracts between modules.
 
-This file is the single source of truth for the types that cross module
-boundaries. It is owned by the integrator: do not edit it from a module
-workstream. If a contract needs to change, report it instead.
+The types that cross module boundaries live here. Change them with care:
+most modules and many tests depend on them.
 
 Conventions
 -----------

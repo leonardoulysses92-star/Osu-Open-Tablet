@@ -10,15 +10,7 @@ from osu_tablet_assistant.gui import i18n, wizard
 from osu_tablet_assistant.gui.app import App
 from osu_tablet_assistant.gui.session import GOALS, STEP_ORDER, SessionError, Step
 from test_integration import Harness
-
-
-def _display_available() -> bool:
-    try:
-        root = tk.Tk()
-    except tk.TclError:
-        return False
-    root.destroy()
-    return True
+from support import display_available
 
 
 class GoalSessionTests(unittest.TestCase):
@@ -76,7 +68,7 @@ class GoalSessionTests(unittest.TestCase):
         self.assertIn("advanced_ui", appconfig.AppConfig().__dict__)
 
 
-@unittest.skipUnless(_display_available(), "no display")
+@unittest.skipUnless(display_available(), "no display")
 class GoalGuiTests(unittest.TestCase):
     def setUp(self) -> None:
         self.addCleanup(i18n.set_language, "es")

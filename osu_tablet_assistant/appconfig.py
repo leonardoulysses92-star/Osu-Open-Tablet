@@ -22,8 +22,7 @@ from urllib.parse import urlparse
 
 from .engine.adapt import DEFAULT_STEP_LEVEL, STEP_LEVELS
 from .engine.playtypes import ANALYSIS_DETAILS, DEFAULT_DETAIL
-from .gui.hotkeys import DEFAULT_BINDINGS, clean_bindings
-from .keys import DEFAULT_CLICK_KEYS, KeyChoice
+from .keys import DEFAULT_BINDINGS, DEFAULT_CLICK_KEYS, KeyChoice, clean_bindings
 
 APP_DIR_NAME = "OsuOpenTablet"
 CONFIG_FILE = "config.json"
@@ -71,7 +70,7 @@ class AppConfig:
     analysis_detail: str = DEFAULT_DETAIL      # normal (3x4) | fine (6x8) | very_fine (9x12)
     free_aspect: bool = False                  # the coach may change the area's proportion (not only its size)
     # Companion: global hotkeys per action ("" = none; never two actions on one combination, see
-    # ``gui.hotkeys.clean_bindings``) and the step size (normal | fine | very_fine).
+    # ``keys.clean_bindings``) and the step size (normal | fine | very_fine).
     companion_hotkeys: dict[str, str] = field(default_factory=lambda: dict(DEFAULT_BINDINGS))
     companion_step: str = DEFAULT_STEP_LEVEL
 

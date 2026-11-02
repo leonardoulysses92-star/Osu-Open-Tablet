@@ -31,6 +31,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Iterable, Mapping
 
+from ..log import log_exception
 from . import osucfg
 from .beatmap import (BeatmapIndex, IndexEntry, WindowTitle, _loose, _norm, load_beatmap, parse_window_title,
                       read_header)
@@ -170,6 +171,7 @@ class MapIndex:
         try:
             db = self._loader(self.db_path)
         except Exception:      # an unexpected file must never break the coach
+            log_exception(f"reading {self.db_path}")
             db = None
         if db is None:
             with self._lock:
@@ -440,7 +442,7 @@ class LazerIndex:
         try:
             self.build()
         except Exception:      # never let a strange file kill the coach
-            pass
+            log_exception("indexing the osu!lazer files")
 
     def stop(self, timeout: float = 2.0) -> None:
         self._stop.set()

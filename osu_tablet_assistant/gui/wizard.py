@@ -93,12 +93,6 @@ def error_text(exc: BaseException) -> tuple[str, str]:
     return t("core.error.unexpected"), f"{type(exc).__name__}: {exc}"
 
 
-def error_with_detail(exc: BaseException) -> str:
-    """The user message followed by its technical detail, for plain-text contexts."""
-    message, detail = error_text(exc)
-    return f"{message}\n{t('gui.details.title')}: {detail}" if detail else message
-
-
 class Page(ttk.Frame):
     """Base class of a wizard page."""
 

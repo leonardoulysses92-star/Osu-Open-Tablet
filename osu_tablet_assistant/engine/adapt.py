@@ -440,11 +440,6 @@ def _with_axis(state: AdaptState, axis: str, ax: AxisState, converged_reason: li
 # --------------------------------------------------------------------------
 # Public API
 # --------------------------------------------------------------------------
-def tunable_paths() -> frozenset[str]:
-    """Filter paths with a feel axis."""
-    return frozenset(FAMILIES)
-
-
 def step(state: AdaptState, profile: ProfileInfo, intent: Intent | str, policy: TuningPolicy | None = None,
          catalog: Mapping[str, FilterSpec] | None = None, tablet: TabletSpec | None = None, *,
          level: str | None = None) -> StepResult:

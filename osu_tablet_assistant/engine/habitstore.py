@@ -15,7 +15,7 @@ so a change the coach already made is not counted twice:
 * rotation: minus the rotation added since;
 * trail and jitter depend on the filters: only plays with the same smoothing count.
 
-Plays flagged for EMI are kept only for the spike count (research rule 10: do not tune on them). Views:
+Plays flagged for EMI are kept only for the spike count (rule 10: do not tune on them). Views:
 ``session`` (this coach session) and ``long`` (the last ``LONG_TERM_DAYS`` days).
 
 When a habit is worth acting on (the thresholds are heuristics, see the constants): significant (``> 2 SE``),
@@ -49,19 +49,17 @@ MAX_PLAYS = 300            # older plays are forgotten
 LONG_TERM_DAYS = 90.0      # the long-term view only looks this far back (heuristic)
 MIN_PLAYS_AGREE = 2        # heuristic: a habit must show up the same way in at least this many plays ...
 MIN_SAMPLES = 50           # ... over at least this many objects / jumps in total (S20: 50 usable jumps) ...
-HIGH_PLAYS = 5             # ... and "high" confidence needs at least this many plays (S20: 5 replays)
 SE_FLOOR = 1e-4            # a reported SE below this is treated as this (keeps one play from dominating)
 # Setups this close count as the same one (heuristic): a few coach steps do not make a "new setup".
 SAME_SIZE = 0.05           # relative width / height
 SAME_CENTER_MM = 3.0
 SAME_ROTATION_DEG = 3.0
 SAME_SMOOTHING_MS = 2.0
-# Adaptation window (research rule 11; forum anecdotes: hours to days for an area, days to two weeks after
+# Adaptation window (rule 11; forum anecdotes: hours to days for an area, days to two weeks after
 # leaving heavy smoothing). Heuristics.
 ADAPT_AREA_DAYS = 3.0
 ADAPT_SMOOTHING_DAYS = 10.0
 HEAVY_SMOOTHING_MS = 8.0   # the smoothing card's "quite a lot" warning
-AREA_HABITS = (hb.AIM_X, hb.AIM_Y, hb.GAIN_X, hb.GAIN_Y, hb.ROTATION)
 SMOOTHING_HABITS = (hb.TRAIL, hb.JITTER, hb.JITTER_HOVER)
 DERIVED = (hb.SIZE, hb.ASPECT)                       # recomputed from the pooled gains
 _UNITS = {hb.AIM_X: "r", hb.AIM_Y: "r", hb.GAIN_X: "frac", hb.GAIN_Y: "frac", hb.SIZE: "frac", hb.ASPECT: "frac",

@@ -49,8 +49,8 @@ def prepare_session(session: Session, app_dir: Path) -> None:
     """Wire the program's own config and community-data cache into ``session`` (real runs only).
 
     Reads ``<app_dir>/config.json`` (tolerant), applies its plugin policy and
-    activates the cached community data if it is still valid (local files
-    only; nothing is downloaded here).
+    activates the cached community data if it is valid and newer than the
+    packaged data (local files only; nothing is downloaded here).
     """
     from ..appconfig import CONFIG_FILE, load_config
     from ..models import PluginPolicy
@@ -60,7 +60,8 @@ def prepare_session(session: Session, app_dir: Path) -> None:
     session.prefs.plugin_policy = PluginPolicy(session.app_config.plugin_policy)
     from ..profile import PROFILE_FILE, ProfileStore
     session.profile_store = ProfileStore(app_dir / PROFILE_FILE).load()
-    session.data_cache_dir = app_dir / "data"
+    from ..knowledge.updater import CACHE_DIR_NAME
+    session.data_cache_dir = app_dir / CACHE_DIR_NAME
     session.data_bundle = session._optional(session.services.activate_data_cache, session.data_cache_dir)
 
 

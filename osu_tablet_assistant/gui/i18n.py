@@ -36,11 +36,6 @@ def _catalog(lang: str) -> dict[str, str]:
     return _catalogs[lang]
 
 
-def reload() -> None:
-    """Drop the cache so locale files are read again."""
-    _catalogs.clear()
-
-
 def set_language(lang: str) -> None:
     """Select the UI language; raises ValueError for unsupported codes."""
     global _language

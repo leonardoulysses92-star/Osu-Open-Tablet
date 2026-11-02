@@ -1,7 +1,4 @@
 {
-  "engine.confidence.high": "High confidence (checked against the plugin source)",
-  "engine.confidence.medium": "Medium confidence (partly documented)",
-  "engine.confidence.low": "Low confidence (little documentation, partly guessed)",
 
   "engine.candidate.no-filter.label": "No filters (reference)",
   "engine.candidate.no-filter.summary": "Your tablet as it is, with no filters. Used as the baseline to compare everything else.",

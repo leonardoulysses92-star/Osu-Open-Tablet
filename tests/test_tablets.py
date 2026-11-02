@@ -43,10 +43,6 @@ class BuiltinTests(unittest.TestCase):
                      "Gaomon S620", "VEIKK S640"):
             self.assertIn(name, by_name)
 
-    def test_verified_flag(self) -> None:
-        self.assertTrue(tablets.is_verified("wacom ctl-472"))
-        self.assertFalse(tablets.is_verified("Unknown Pad"))
-
 
 class MatchingTests(unittest.TestCase):
     def setUp(self) -> None:

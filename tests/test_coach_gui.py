@@ -9,18 +9,10 @@ from osu_tablet_assistant.gui import hotkeys as hk
 from osu_tablet_assistant.gui import i18n
 from osu_tablet_assistant.models import PenSample
 from test_coach import CTL472, DISPLAY, USER_AREA, Env
+from support import display_available
 
 
-def _display_available() -> bool:
-    try:
-        root = tk.Tk()
-    except tk.TclError:
-        return False
-    root.destroy()
-    return True
-
-
-@unittest.skipUnless(_display_available(), "no display")
+@unittest.skipUnless(display_available(), "no display")
 class CoachWindowTests(unittest.TestCase):
     def setUp(self) -> None:
         from osu_tablet_assistant.gui import coach
@@ -174,7 +166,7 @@ class FakeSession:
             raise OSError("disk full")
 
 
-@unittest.skipUnless(_display_available(), "no display")
+@unittest.skipUnless(display_available(), "no display")
 class ClickKeysCardTests(unittest.TestCase):
     def setUp(self) -> None:
         from osu_tablet_assistant.gui import coach
@@ -379,7 +371,7 @@ class ClickKeysCardTests(unittest.TestCase):
         return " ".join(out)
 
 
-@unittest.skipUnless(_display_available(), "no display")
+@unittest.skipUnless(display_available(), "no display")
 class AreaAndSmoothingCardTests(unittest.TestCase):
     """The area in numbers, "Ajustar el área a mano" and the smoothing card (synthetic, nothing real is touched)."""
     HAWKU = "TabletDriverFilters.Hawku.Smoothing"
@@ -544,7 +536,7 @@ class AreaAndSmoothingCardTests(unittest.TestCase):
             win.destroy()
 
 
-@unittest.skipUnless(_display_available(), "no display")
+@unittest.skipUnless(display_available(), "no display")
 class TabletMapTests(unittest.TestCase):
     def test_draws_every_layer_without_errors(self) -> None:
         from osu_tablet_assistant.gui.tabletmap import TabletMap

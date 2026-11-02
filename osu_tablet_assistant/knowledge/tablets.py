@@ -61,15 +61,6 @@ def builtin_tablets() -> list[TabletSpec]:
     return [s for s in specs if s is not None]
 
 
-def is_verified(name: str) -> bool:
-    """True if a built-in tablet's area and pressure were checked against OTD."""
-    key = normalize_name(name)
-    return any(
-        normalize_name(str(r.get("name", ""))) == key and r.get("verified") is True
-        for r in _builtin_rows()
-    )
-
-
 def _otd_config_tablets(install_dir: Path | None) -> list[TabletSpec]:
     """Parse ``<install_dir>/Configurations/**/*.json`` if that folder exists."""
     if install_dir is None:

@@ -24,6 +24,7 @@ import random
 import statistics
 from typing import Sequence
 
+from ..log import log_exception
 from ..models import PenSample, Reason
 from . import areafit, hotspots
 from .beatmap import circle_radius_osu_px, hit_window_ms, playfield_scale, playfield_to_desktop
@@ -243,17 +244,6 @@ def _best_alignment(beatmap: Beatmap, clicks: Sequence[float], end: float
             break
     assert best is not None
     return best
-
-
-def estimate_alignment(beatmap: Beatmap, capture: PlayCapture) -> Alignment:
-    """How the clicks line up with the map: global offset, speed (1 / 1.5 / 0.75), quality 0..1.
-
-    ``flip_y`` is decided inside :func:`analyze_play`, which has the cursor positions.
-    """
-    clicks = sorted(c.t for c in capture.clicks)
-    if not beatmap.judged_objects or len(clicks) < 3:
-        return Alignment()
-    return _best_alignment(beatmap, clicks, _end_time(capture))[0]
 
 
 # ------------------------------------------------------------------- geometry
@@ -550,6 +540,7 @@ def analyze_play(beatmap: Beatmap, capture: PlayCapture, rows: int = GRID_ROWS, 
     try:
         return _analyze(beatmap, capture, rows, cols, seed, detail)
     except Exception:   # a live display must never die on odd data
+        log_exception("analysing the play")
         return PlayReport(warnings=(Reason("play.warn.analysis_failed"),), partial=capture.ended_at is None)
 
 

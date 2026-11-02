@@ -7,10 +7,15 @@ dist/
 *.egg-info/
 .pytest_cache/
 *.spec
+*.exe
+# Editor and tool folders
+.claude/
+.vscode/
+.idea/
 # Never commit a real OpenTabletDriver config
 settings.json
 Presets/
 Backup/
 
-# graphify output (local analysis, not part of the program)
+# Local code-graph output, not part of the program
 graphify-out/

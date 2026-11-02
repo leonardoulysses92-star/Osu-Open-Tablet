@@ -88,6 +88,18 @@ class ParseTests(unittest.TestCase):
             self.assertIsNone(rp.parse_replay(bad))
         self.assertIsNone(rp.parse_replay(b"\x00" * (rp.MAX_FILE_BYTES + 1)))
 
+    def test_frame_data_that_unpacks_too_big_is_refused(self) -> None:
+        bomb = lzma.compress(b"0" * 5000, format=lzma.FORMAT_ALONE)    # small file, large once unpacked
+        self.assertEqual(len(rp._unpack(bomb, limit=5000)), 5000)
+        with self.assertRaises(ValueError):
+            rp._unpack(bomb, limit=4999)
+        original = rp.MAX_FRAME_TEXT_BYTES
+        self.addCleanup(setattr, rp, "MAX_FRAME_TEXT_BYTES", original)
+        good = make_osr(capture())
+        self.assertIsNotNone(rp.parse_replay(good))
+        rp.MAX_FRAME_TEXT_BYTES = 100
+        self.assertIsNone(rp.parse_replay(good))                         # a soft failure, never an exception
+
     def test_load_from_disk_and_missing_file(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "a.osr"

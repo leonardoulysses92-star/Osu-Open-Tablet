@@ -1,4 +1,4 @@
-"""Design tokens, the "calm dark glass" ttk theme and the reusable widgets of the wizard.
+"""Design tokens, the dark ttk theme and the reusable widgets of the wizard.
 
 Everything visual is defined here (colours in :mod:`.palette`) so the pages stay consistent:
 
@@ -743,10 +743,6 @@ class WrapLabel(ttk.Label):
         kwargs.setdefault("style", _surface_style(parent, f"{role}.TLabel"))
         super().__init__(parent, text=text, justify="left", **kwargs)
         self.bind("<Configure>", self._rewrap)
-
-    def set_role(self, role: str) -> None:
-        """Switch to another label role (keeps the surface)."""
-        self.configure(style=_surface_style(self.master, f"{role}.TLabel"))
 
     def _rewrap(self, event: tk.Event) -> None:
         wrap = max(event.width - 4, 80)

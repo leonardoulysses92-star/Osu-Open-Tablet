@@ -38,10 +38,7 @@ TICKS_AT_EPOCH = 621_355_968_000_000_000      # .NET ticks (100 ns since 0001-01
 TIMING_POINT_BYTES = 17                        # double BPM, double offset, bool inherited
 
 _INT = struct.Struct("<i")
-_SHORT = struct.Struct("<h")
 _LONG = struct.Struct("<q")
-_FLOAT = struct.Struct("<f")
-_DOUBLE = struct.Struct("<d")
 _COUNTS = struct.Struct("<Bhhhq")              # status, circles, sliders, spinners, last modified
 _FLOAT4 = struct.Struct("<4f")
 _BYTE4 = struct.Struct("<4B")
@@ -78,10 +75,6 @@ class OsuDbEntry:
     def key(self) -> str:
         """``Artist - Title [Version]``, the text the window title shows while it is played."""
         return f"{self.artist} - {self.title} [{self.version}]"
-
-    @property
-    def key_unicode(self) -> str:
-        return f"{self.artist_unicode or self.artist} - {self.title_unicode or self.title} [{self.version}]"
 
 
 @dataclass(frozen=True)

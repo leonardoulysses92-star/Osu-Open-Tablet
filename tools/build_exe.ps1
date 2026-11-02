@@ -1,10 +1,10 @@
 <#
 Builds "Osu Open Tablet.exe" (one file, no console window) with PyInstaller.
 
-  powershell -ExecutionPolicy Bypass -File build_exe.ps1
+  powershell -ExecutionPolicy Bypass -File tools\build_exe.ps1
 
 Needs Python 3.10+ with tkinter and PyInstaller (py -3 -m pip install pyinstaller).
-The result is written to dist\Osu Open Tablet.exe.
+The result is written to dist\Osu Open Tablet.exe in the repository folder.
 
 Why every module and data file is listed by hand: the program loads some of its
 modules on demand (the pen tests, the recommendation engine, the OTD controller),
@@ -14,7 +14,7 @@ package, so a new module or data file is picked up without editing this script.
 #>
 $ErrorActionPreference = 'Stop'
 
-$root = $PSScriptRoot
+$root = Split-Path $PSScriptRoot     # the repository; this script lives in tools\
 $package = 'osu_tablet_assistant'
 # A short path keeps PyInstaller clear of Windows' 260-character path limit.
 $build = Join-Path $env:TEMP 'osu-open-tablet-build'

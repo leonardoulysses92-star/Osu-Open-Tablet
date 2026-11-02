@@ -29,12 +29,12 @@ from ..appconfig import app_data_dir
 from ..engine import adapt, habitstore, optimizer as opt
 from ..engine.playtypes import PlayReport
 from ..keys import KeyChoice, display_list
+from ..log import log_exception
 from ..models import Reason
 from ..otd.livetune import LiveTuner, controller_sender, dry_run_sender
 from . import hotkeys as hk
 from .coachcore import (ANALYSIS_EVERY_S, FREE_ONLY, MANUAL_MOVES, PHASES, CoachCore, CoachFeedback, Readiness,
                         RoundResult, Translate, area_changes, area_summary, ledger_text, rounds_text, say)
-from .companion import companion_args_from_session, make_click_through
 from .i18n import t as default_t
 from .keycard import ClickKeysCard
 from .smoothcard import SmoothingCard
@@ -42,6 +42,7 @@ from .stylecard import StyleCard
 from .tabletmap import TabletMap
 from .widgets import (COLORS, Card, Chip, Expander, Notice, ReadOnlyText, ScrollFrame, WrapLabel, apply_theme,
                       bullets, button, check, dark_title_bar, frame, icon_image, label, px, surface_color)
+from .winutil import companion_args_from_session, make_click_through
 
 TICK_MS = 100
 MAP_POLL_S = 0.1       # how often osu!'s window title is read (one cheap window enumeration; lookups are O(1))
@@ -433,7 +434,7 @@ class CoachWindow:
             change(config)
             self.session.save_app_config()
         except Exception:            # saving is a convenience: the choice still applies to this session
-            pass
+            log_exception("saving the assistant's settings")
 
     def choose_keys(self) -> None:
         """From a "no click seen" hint: back to prepare (dropping what was recorded) and listen for the buttons."""

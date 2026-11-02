@@ -13,10 +13,11 @@ What it does, in order (nothing is pushed):
   1. checks the working tree is clean, the version is new and the tests pass;
   2. raises the version in pyproject.toml, osu_tablet_assistant/__init__.py and both READMEs;
   3. adds the entry to CHANGELOG.md, commits and creates the tag vX.Y.Z (the old versions stay as tags);
-  4. builds the .exe with build_exe.ps1 and starts it once to make sure it opens;
-  5. moves the previous "Osu Open Tablet vX.exe" of the Desktop folder into "Versiones anteriores" and
-     copies the new one next to LICENSE.
+  4. builds the .exe with tools\build_exe.ps1 and starts it once to make sure it opens;
+  5. moves the previous "Osu-Open-Tablet-vX.exe" of the destination folder (-Dest, default "Osu Open Tablet"
+     on the Desktop) into "Versiones anteriores" and copies the new one there.
 At the end it prints the git push command. -DryRun only shows what would be done.
+Versions 1.0 and above are refused: the project stays below 1.0 until the owner decides otherwise.
 #>
 param(
     [string]$Version,
@@ -66,7 +67,7 @@ if ($DryRun) {
     "DRY RUN for $tag"
     "  tests, then version -> $Version (pyproject.toml, __init__.py, README.md, README.en.md as $phase)"
     "  CHANGELOG.md entry: $Notes"
-    "  commit + tag $tag, build_exe.ps1, open the exe once"
+    "  commit + tag $tag, tools\build_exe.ps1, open the exe once"
     "  move to '$archive': " + $(if ($old) { ($old.Name -join ', ') } else { '(nothing there yet)' })
     "  copy the new exe to '$Dest\Osu-Open-Tablet-v$Version.exe' (no spaces: this is also the file to upload to GitHub)"
     return
@@ -78,8 +79,8 @@ if ($LASTEXITCODE -ne 0) { throw 'The tests fail: nothing was changed.' }
 
 Edit-File 'pyproject.toml' { param($t) $t -replace '(?m)^version = "[^"]*"', "version = `"$Version`"" }
 Edit-File 'osu_tablet_assistant/__init__.py' { param($t) $t -replace '(?m)^__version__ = "[^"]*"', "__version__ = `"$Version`"" }
-Edit-File 'README.md' { param($t) $t -replace 'fase temprana \(\d+\.\d+\.x\)', "fase temprana ($phase)" }
-Edit-File 'README.en.md' { param($t) $t -replace 'Early stage \(\d+\.\d+\.x\)', "Early stage ($phase)" }
+Edit-File 'README.md' { param($t) $t -replace 'de pruebas \(\d+\.\d+\.x\)', "de pruebas ($phase)" }
+Edit-File 'README.en.md' { param($t) $t -replace 'test version \(\d+\.\d+\.x\)', "test version ($phase)" }
 $marker = '<!-- versiones-nuevas-aqui -->'
 $entry = "$marker`n`n## $Version ($(Get-Date -Format 'yyyy-MM-dd'))`n`n- $Notes"
 Edit-File 'CHANGELOG.md' { param($t)
@@ -90,7 +91,7 @@ Run-Git add -A
 Run-Git commit -m "Version $Version" -m $Notes
 Run-Git tag -a $tag -m "Version $Version"
 
-& powershell -ExecutionPolicy Bypass -File (Join-Path $root 'build_exe.ps1')
+& powershell -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'build_exe.ps1')
 $built = Join-Path $root 'dist\Osu Open Tablet.exe'
 if (-not (Test-Path $built)) { throw 'The exe was not built.' }
 $probe = Start-Process $built -ArgumentList '--dry-run' -PassThru

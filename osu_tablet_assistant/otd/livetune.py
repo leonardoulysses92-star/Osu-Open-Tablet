@@ -34,7 +34,7 @@ from typing import Any, Mapping
 
 from ..knowledge.filters import FINEST_GRID_DIVISOR, FilterSpec, load_catalog
 from ..models import ApplyResult, ProfileChanges, ProfileInfo, Reason, Rect, TabletSpec
-from . import settings_io
+from . import settings_io, winproc
 
 DEFAULT_MIN_INTERVAL_S = 0.15
 DEFAULT_RPC_TIMEOUT_S = 1.5
@@ -411,11 +411,6 @@ def find_osu(processes: Sequence[ProcessEntry]) -> OsuProcess | None:
     return found[0] if found else None
 
 
-def is_osu_running(lister: ProcessLister | None = None) -> bool:
-    """True when an osu! (stable or lazer) process exists."""
-    return find_osu((lister or list_processes)()) is not None
-
-
 def list_processes() -> list[ProcessEntry]:
     """Running processes (Windows: toolhelp snapshot, ``tasklist`` fallback; else ``ps``)."""
     if sys.platform == "win32":
@@ -427,43 +422,8 @@ def list_processes() -> list[ProcessEntry]:
 
 
 def _toolhelp_processes() -> list[ProcessEntry]:
-    import ctypes
-    from ctypes import wintypes
-
-    class Entry(ctypes.Structure):
-        _fields_ = [("dwSize", wintypes.DWORD), ("cntUsage", wintypes.DWORD),
-                    ("th32ProcessID", wintypes.DWORD), ("th32DefaultHeapID", ctypes.c_size_t),
-                    ("th32ModuleID", wintypes.DWORD), ("cntThreads", wintypes.DWORD),
-                    ("th32ParentProcessID", wintypes.DWORD), ("pcPriClassBase", wintypes.LONG),
-                    ("dwFlags", wintypes.DWORD), ("szExeFile", wintypes.WCHAR * 260)]
-
-    k32 = ctypes.WinDLL("kernel32", use_last_error=True)
-    k32.CreateToolhelp32Snapshot.restype = wintypes.HANDLE
-    k32.OpenProcess.restype = wintypes.HANDLE
-    snap = k32.CreateToolhelp32Snapshot(0x2, 0)   # TH32CS_SNAPPROCESS
-    if not snap or snap == wintypes.HANDLE(-1).value:
-        raise OSError("CreateToolhelp32Snapshot failed")
-    out: list[ProcessEntry] = []
-    try:
-        entry = Entry()
-        entry.dwSize = ctypes.sizeof(Entry)
-        ok = k32.Process32FirstW(snap, ctypes.byref(entry))
-        while ok:
-            name = entry.szExeFile
-            path = None
-            if name.lower() in OSU_EXE_NAMES:   # only resolve the path for candidates
-                proc = k32.OpenProcess(0x1000, False, entry.th32ProcessID)   # QUERY_LIMITED_INFORMATION
-                if proc:
-                    buf = ctypes.create_unicode_buffer(32768)
-                    size = wintypes.DWORD(len(buf))
-                    if k32.QueryFullProcessImageNameW(proc, 0, buf, ctypes.byref(size)):
-                        path = buf.value
-                    k32.CloseHandle(proc)
-            out.append(ProcessEntry(int(entry.th32ProcessID), name, path))
-            ok = k32.Process32NextW(snap, ctypes.byref(entry))
-    finally:
-        k32.CloseHandle(snap)
-    return out
+    # only the osu! candidates get their path resolved
+    return [ProcessEntry(pid, name, path) for pid, name, path in winproc.processes_with_paths(OSU_EXE_NAMES)]
 
 
 def parse_tasklist_csv(text: str) -> list[ProcessEntry]:

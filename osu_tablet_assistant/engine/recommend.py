@@ -57,9 +57,9 @@ HOVER_LIMITER = "Hover_Distance_Limiter.Hover_Distance_Limiter"
 RESEARCH_ORDER = (HOVER_LIMITER, SATURN_HRRNC, SPECTRAL, RECONSTRUCTOR, NOISE_REDUCTION, CHATTER_SMOOTH,
                   SATURN_MULTI, RADIAL_TABLET, ANTICHATTER, HAWKU, RESAMPLER, SCUFFED, CHATTER_RAW,
                   RADIAL_SCREEN, BEZIER, FRENET, SATURN_ROUNDING)
-# DEPRECATED pre-audit order (Temporal Resampler first, as if "raw" ran before
-# "pre"). Kept unchanged only because engine.adapt (companion mode, another
-# workstream) imports it; new code uses RESEARCH_ORDER.
+# Older order (Temporal Resampler first, as if "raw" ran before "pre"). Only
+# engine.adapt uses it, to place a filter it adds into an existing chain; new
+# chains use RESEARCH_ORDER.
 CHAIN_ORDER = (RESAMPLER, NOISE_REDUCTION, CHATTER_SMOOTH, SATURN_MULTI, RADIAL_TABLET,
                ANTICHATTER, HAWKU, CHATTER_RAW, RADIAL_SCREEN, SATURN_ROUNDING)
 ASYNC_SMOOTHERS = (HAWKU, ANTICHATTER)

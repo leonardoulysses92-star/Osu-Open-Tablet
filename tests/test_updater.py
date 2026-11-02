@@ -135,6 +135,17 @@ class UpdaterTests(unittest.TestCase):
         self.assertIsNone(up.activate_cache(self.cache))
         self.assertGreater(len(kpresets.load_presets().presets), 5)
 
+    def test_old_cache_does_not_hide_newer_packaged_data(self) -> None:
+        # A download from before the program was updated: valid, but not newer than what is packaged now.
+        files = _bundle(version=up.packaged_version())
+        self.cache.mkdir(parents=True)
+        for name, data in files.items():
+            (self.cache / name).write_bytes(data)
+        self.assertIsNotNone(up.load_cache(self.cache))            # the files themselves are fine
+        self.assertIsNone(up.activate_cache(self.cache))
+        self.assertGreater(len(kpresets.load_presets().presets), 5)
+        self.assertEqual(up.status()["origin"], "bundled")
+
     def test_status_staleness(self) -> None:
         s = up.status(today=date(2026, 11, 15))
         self.assertEqual((s["origin"], s["stale"], s["age_days"]), ("bundled", False, 16))

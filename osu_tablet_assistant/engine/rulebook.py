@@ -1,6 +1,6 @@
-"""The coach's rulebook: what an experienced player would change for these habits (pure, no tkinter).
+"""The coach's rulebook: which setup change fits these habits (pure, no tkinter).
 
-The 18 rules of the community research (``community-practice.md``, section 2) are kept as data
+The 18 rules gathered from community sources (listed in docs/PLAY_COACH.md, "Sources") are kept as data
 (:data:`RULES`, with their sources) and :func:`suggest` turns pooled habits (``engine.habitstore.HabitView``)
 plus the current area, filters and tablet into ordered :class:`Suggestion` s. The setup adapts to the player;
 nothing here ever asks the player to change how they play.
@@ -10,9 +10,9 @@ How a rule fires (every threshold is a heuristic, named below):
 * the habit is **actionable** in the long-term view: significant (> 2 SE), repeated in at least two plays and
   backed by 50+ objects / jumps (``habitstore``), and this session does not clearly say the opposite;
 * it **plausibly costs hits**: a systematic error of that size, on top of the player's own scatter, misses at
-  least ``MISS_COST_MIN`` more objects (``habits.miss_cost``; research rule 16: "big enough to feel" and it
+  least ``MISS_COST_MIN`` more objects (``habits.miss_cost``; rule 16: "big enough to feel" and it
   costs points). Otherwise the verdict is *keep the current setting* (rule 16);
-* steps obey the caps of the research: about 3 % of size, at most 1.5 mm of shift and 2 degrees of rotation per
+* steps obey the caps taken from the sources: about 3 % of size, at most 1.5 mm of shift and 2 degrees of rotation per
   round (S20, S26), times nothing else: the optimizer's trust region still applies on top.
 
 Order (the optimizer applies only the first *change*: one change per round): interference (10) and the
@@ -47,7 +47,7 @@ LIGHTER, REMOVE, ADD_LIGHT = "smoothing_lighter", "smoothing_remove", "smoothing
 EMI, WAIT, OFFSET, NOTE, KEEP = "flag_emi", "wait", "global_offset", "note", "keep"
 CHANGES = (SHIFT, SIZE, ROTATE, LIGHTER, REMOVE, ADD_LIGHT)
 BLOCKING = (EMI, WAIT)
-# ------------------------------------------------------------- caps (research, section 2)
+# ------------------------------------------------------------- caps per round (from S20 / S26)
 SIZE_CAP = 0.03            # about 3 % of size per round (S20)
 SIZE_MIN = 0.01            # smaller changes cannot be felt (and are below the optimizer's steps)
 SHIFT_CAP_MM = 1.5         # at most 1.5 mm per round (S26)
@@ -74,11 +74,11 @@ NOTABLE = {hb.EDGE_STOP: 0.1, hb.TAP_LEAD: 15.0, hb.KEY_GAP: 8.0, hb.DRIFT_X: 0.
 
 @dataclass(frozen=True)
 class Rule:
-    """One rule of the research rulebook (``community-practice.md`` section 2), as data."""
+    """One rule of the rulebook, as data."""
     id: int
     symptom: str
     adaptation: str
-    confidence: str            # as the research rates it
+    confidence: str            # how well its sources support it
     sources: tuple[str, ...]
     measured: bool = True      # False: needs the player to tell (not measurable from a play)
 
@@ -126,7 +126,7 @@ class Suggestion:
     """What the rulebook proposes for one habit. Only ``CHANGES`` touch the setup."""
     rule: int
     action: str
-    reason: Reason                             # in the coach's voice ("un jugador con experiencia haría ...")
+    reason: Reason                             # plain words: what was seen and what the change does
     confidence: str
     habits: tuple[str, ...] = ()
     accommodation: Reason | None = None        # short: "por eso el área sube un 3 %"

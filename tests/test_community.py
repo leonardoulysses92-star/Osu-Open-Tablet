@@ -185,7 +185,6 @@ class PolicyTests(unittest.TestCase):
         cands = {c.id: c for c in generate_candidates(CTL472, DISPLAY, prefs(PluginPolicy.INSTALLED), INSTALLED,
                                                       None, USER_PROFILE, BUNDLE.presets)}
         dever = cands["community:dever-mixmg"]
-        self.assertEqual(comm.label_params(dever), {"name": "Dever"})
         keys = [r.key for r in dever.reasons]
         self.assertEqual(keys[:3], ["engine.reason.community_source_undated",
                                     "engine.reason.community_confidence_high",

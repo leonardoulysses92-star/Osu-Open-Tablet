@@ -1,70 +1,67 @@
 # Historial de versiones
 
-La versión actual es la que está en `main`. Cada versión anterior queda **separada** como una etiqueta de Git
-(`v0.1.0`, `v0.2.0`...): `git checkout v0.5.0` muestra el proyecto tal como estaba entonces, y
-`git tag` las lista todas. El `main` no guarda copias de versiones viejas ni ejecutables.
-
-Los números siguen el tamaño del cambio: pequeño → `0.8.0.1` (se muestra "8.0.1"), medio → `0.8.1` ("8.1"),
-grande → `0.9.0` ("9"). Detalle en [CONTRIBUTING.md](CONTRIBUTING.md#publicar-una-versión).
-
-Cómo se publica una versión nueva (el script archiva la anterior y actualiza el proyecto): ver
-[CONTRIBUTING.md](CONTRIBUTING.md#publicar-una-versión).
-
-Aviso: los números 0.2 a 0.7 se asignaron a los ejecutables que se fueron probando; cada etiqueta apunta al
-commit más cercano del que salió ese ejecutable, así que son aproximadas. El número interno del paquete se
-unificó en 0.8.0.
+Lo que cambió en cada versión, de la más nueva a la más antigua. Cada una tiene su etiqueta en Git
+(`git checkout v0.5.0` muestra el proyecto tal como estaba entonces).
 
 <!-- versiones-nuevas-aqui -->
 
 ## 0.9.0 (2026-11-01)
 
-- Coach profesional: aprende tus habitos y adapta el ajuste con reglas de la comunidad, reconoce el mapa al instante con osu!.db y calibra el cursor con el replay
+- El coach aprende tus hábitos a lo largo de varias partidas (hacia dónde caen tus clics, si te quedas corto
+  en los saltos, si el cursor tiembla con el lápiz quieto) y ajusta el área o el suavizado a tu forma de
+  jugar, siguiendo reglas sacadas de la comunidad. Lo que aprende se queda en tu PC y se puede borrar.
+- El mapa que juegas se reconoce en cuanto empieza, gracias a `osu!.db` (y al almacén de archivos de lazer).
+- Después de cada ronda, el replay de osu! sirve para comprobar que el cursor que graba el programa coincide
+  con el del juego.
 
 ## 0.8.1 (2026-11-01)
 
-- Suavizado con cinco niveles segun la comunidad, botones de menos y mas suavizado y aviso cuando ya hay demasiado
+- El suavizado tiene cinco niveles; el del medio es el que usan los jugadores con una tableta y un área
+  parecidas a las tuyas. Botones de "menos" y "más" suavizado.
+- Aviso cuando ya llevas mucho suavizado, y a partir de cierto punto no deja subir más.
 
 ## 0.8.0 (2026-10-31)
 
-- Coach de partidas: la comparación entre rondas pasa a un resumen compacto (primera, mejor y última ronda con
-  datos), un contador de rondas seguidas sin mejora y la lista completa en un desplegable.
-- El número de versión del paquete y de los README queda unificado.
+- Coach: el resumen de rondas muestra solo la primera, la mejor y la última, y cuántas van seguidas sin
+  mejorar. La lista completa sigue disponible, plegada.
 
 ## 0.7.0 (2026-10-31)
 
-- Coach: el área se ajusta de verdad. Si la evidencia no es clara, propone pruebas pequeñas y explicadas
-  que se conservan o se devuelven según la ronda siguiente. Ajuste del área a mano y área actual en números.
-- Suavizado opcional: el jugador decide qué filtros probar, ve qué hacen y los deja o los quita.
-- Modo acompañante compacto con atajos configurables (botón "Atajos" con detección) y pasos Normal, Fino y
-  Muy fino. Corrige un bloqueo de la ventana al abrir el editor de atajos.
+- Coach: si no está claro qué cambiar, prueba un cambio pequeño en el área y en la ronda siguiente decide si
+  se queda o se deshace. El área también se puede ajustar a mano.
+- Puedes probar los filtros de suavizado que tengas instalados: ves qué hace cada uno y tú decides si se queda.
+- Ajuste en vivo más compacto, con atajos que puedes cambiar (con un botón para detectarlos) y pasos Normal,
+  Fino y Muy fino. Arreglado un bloqueo de la ventana al abrir el editor de atajos.
 
 ## 0.6.0 (2026-10-31)
 
-- Coach: reconoce el cambio de mapa al momento y lo muestra; barra de acciones fija en el informe;
-  proporción libre del área (opcional).
+- Coach: se entera al momento de que cambias de mapa, la barra de botones del informe queda siempre a la
+  vista y el área puede cambiar de proporción si lo permites.
 
 ## 0.5.0 (2026-10-31)
 
-- Corrección: la tarjeta "Tus botones de clic" recupera su altura al plegarse.
+- Arreglo: la tarjeta "Tus botones de clic" vuelve a su altura al plegarla.
+- Los errores muestran el detalle técnico. La documentación pasa a la carpeta `docs/`.
 
 ## 0.4.0 (2026-10-31)
 
-- Diseño "cristal oscuro": paneles redondeados y suavizados, sin iconos de emoji.
-- Botones de clic configurables (por defecto Z y X; la punta del lápiz no cuenta salvo que se elija).
-- Análisis por zonas más finas (6×8 por defecto) con detección de zonas pequeñas.
+- Interfaz nueva, oscura y con paneles redondeados, sin iconos de emoji.
+- Puedes elegir con qué botones haces clic (por defecto Z y X; la punta del lápiz solo cuenta si la eliges).
+- El mapa de fallos del coach se divide en zonas más pequeñas (6×8) y detecta problemas en zonas concretas.
 
 ## 0.3.0 (2026-10-30)
 
-- Coach de partidas: observa una partida real, alinea los clics con el mapa y propone un cambio por ronda.
-- Tabla de pruebas con el resultado en palabras; las repeticiones se acumulan en vez de reemplazarse.
-- Tres caminos de entrada, modo Simple/Avanzado, perfil guardado y lectura de repeticiones `.osr`.
-- Documentación reorganizada en `docs/` y `build_exe.ps1` para compilar el `.exe`.
+- Llega el coach de partidas: juegas un mapa de verdad, compara tus clics con el mapa y propone un cambio
+  por ronda.
+- La tabla de pruebas dice en palabras cómo salió cada opción; repetir una prueba suma, no reemplaza.
+- Tres caminos al empezar, modo sencillo o avanzado, perfil guardado para no repetir todo, y lectura de
+  replays `.osr`.
 
 ## 0.2.0 (2026-10-30)
 
-- Prueba de puntería por "hover" (el objetivo se activa al tocarlo, sin clics), interfaz nueva,
-  datos de la comunidad actualizables y modo acompañante.
+- La prueba de puntería ya no pide clics: el objetivo cuenta al pasar el cursor por encima.
+- Interfaz nueva, datos de la comunidad que se pueden actualizar y el primer modo de ajuste en vivo.
 
 ## 0.1.0 (2026-10-30)
 
-- Primer asistente guiado: recomendación de área y filtros, pruebas del lápiz, interfaz, README es/en y licencia MIT.
+- Primera versión: asistente guiado que recomienda área y filtros a partir de pruebas cortas con el lápiz.

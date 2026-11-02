@@ -2,116 +2,73 @@
 
 [English](README.en.md)
 
-Asistente de escritorio (Tkinter) para configurar [OpenTabletDriver](https://opentabletdriver.net) (OTD) al jugar osu!: tamaño y proporción del área, y filtros de suavizado. Sirve para cualquier tableta que OTD soporte.
+> Todavía no hay descarga. El programa está en pruebas y más adelante tendrá un ejecutable para Windows.
+> Mientras tanto se puede probar desde el código: ver [Estado y cómo probarlo hoy](#estado-y-cómo-probarlo-hoy).
 
-Mide el lápiz con cuatro pruebas cortas, genera varias configuraciones candidatas, las prueba una por una y recomienda la que mejor sale, con el motivo de cada cambio. También compara con configuraciones publicadas por jugadores del top, con su fuente y fecha.
+Un programa para Windows que te ayuda a configurar [OpenTabletDriver](https://opentabletdriver.net) para
+osu!: el tamaño y la posición del área y los filtros de suavizado. OpenTabletDriver es un driver de tableta
+gratuito y de código abierto que se usa en lugar del driver del fabricante.
 
 ![Pantalla de prueba de ajustes](docs/screenshots/08-testing-es.png)
 
-Tres caminos: **configuración guiada**, **ajuste en vivo** mientras juegas (acompañante) y **coach de partidas**: juegas un mapa de verdad y el coach te dice en palabras sencillas dónde te quedas corto (esquinas, arriba/abajo, laterales) y propone **un** cambio por ronda hasta que ya no queda nada por ganar. Tus botones de clic son configurables (por defecto Z y X; la punta del lápiz no cuenta salvo que la elijas).
+## Qué hace
 
-Está en una fase temprana (0.9.x). Ver [Estado](#estado).
+Al abrirlo eliges uno de tres caminos:
 
-## Descargar y probar
+- **Configuración guiada.** Respondes unas preguntas y haces pruebas cortas con el lápiz. El programa prueba
+  varias configuraciones, las mide y te recomienda una, con el motivo de cada cambio. Cada prueba dura entre
+  5 y 8 segundos (la de puntería, lo que tardes en pasar por los círculos) tras una cuenta atrás de 3, y cada
+  opción se mide con tres pruebas.
+- **Ajuste en vivo.** Con osu! abierto pides "más suave", "más rápido" o un área más grande con atajos de
+  teclado, y lo notas en el momento. Dura lo que tú quieras.
+- **Coach de partidas.** Juegas un mapa normal; el coach te dice dónde te quedas corto (esquinas, bordes,
+  saltos largos) y propone un solo cambio por ronda. Cada ronda es un mapa.
 
-1. Entra en [Releases](https://github.com/leonardoulysses92-star/Osu-Open-Tablet/releases/latest) y descarga `Osu-Open-Tablet-vX.Y.Z.exe`.
-2. Ábrelo con doble clic. No hace falta instalar Python ni nada más; solo tener [OpenTabletDriver](https://opentabletdriver.net) 0.6.x.
-3. Si no quieres tocar tu configuración todavía, abre el `.exe` desde una consola con `--dry-run`: no aplica nada a OpenTabletDriver.
+Antes del primer cambio guarda una copia de tu configuración de OpenTabletDriver, pide confirmación antes de
+aplicar nada y puedes volver atrás con "Restaurar mis ajustes originales".
 
-Windows puede avisar con "Windows protegió su equipo" porque el programa **no está firmado digitalmente**. Es normal en programas
-pequeños: pulsa "Más información" y "Ejecutar de todas formas" solo si has descargado el archivo de esta página. Cada versión
-publica su huella SHA-256 en las notas para que puedas comprobarla (`Get-FileHash archivo.exe`). Si prefieres no usar el `.exe`,
-puedes ejecutar el código con Python o compilarlo tú (ver "Uso" más abajo): es el mismo código de este repositorio.
+## ¿Y las normas de osu!?
 
-Es una versión temprana y no se ha verificado con todas las tabletas ni con todas las versiones de osu!. Antes de cambiar nada hace
-una copia de seguridad de tus ajustes, y siempre puedes volver atrás. Si algo falla, abre una [incidencia](https://github.com/leonardoulysses92-star/Osu-Open-Tablet/issues).
+El programa solo cambia ajustes de OpenTabletDriver (área y filtros de suavizado), lo mismo que podrías hacer
+tú a mano. No lee la memoria de osu!, no envía clics ni movimientos al juego, y nunca activa la predicción
+ni plugins que asistan la entrada. Aun así, mandan las [reglas de osu!](https://osu.ppy.sh/wiki/Rules) y el
+[aviso de osu! sobre plugins de OpenTabletDriver](https://osu.ppy.sh/community/forums/topics/2254092): si
+dudas de un plugin, consulta ahí. Más detalle en [docs/filtros.md](docs/filtros.md).
 
-## Requisitos
+## Estado y cómo probarlo hoy
 
-- Windows 10 u 11. Linux y macOS no están probados.
-- Python 3.10 o superior con `tkinter`. No hay dependencias de `pip`.
-- OpenTabletDriver 0.6.x, instalado o portable. Con interpoladores en Windows conviene la 0.6.8.1 o posterior; con la 0.6.7 el asistente avisa y no te obliga a actualizar.
+Es una versión de pruebas (0.9.x).
 
-## Uso
+- No hay ejecutable publicado todavía. Cuando lo haya, estará en la página de Releases de este repositorio.
+- Ninguna tableta se ha probado aún con este programa en un equipo real. La lista que trae (48 modelos de
+  Wacom, XP-Pen, Huion, Gaomon y VEIKK) tiene las medidas comprobadas con los archivos de OpenTabletDriver;
+  cualquier otra tableta que OpenTabletDriver soporte se puede usar escribiendo sus medidas.
+- Aplicar ajustes en vivo está hecho a partir del código de OpenTabletDriver, pero tampoco se ha comprobado
+  con hardware real.
 
-```
-py -3 -m osu_tablet_assistant
-```
+Para probarlo necesitas Windows 10 u 11, OpenTabletDriver 0.6.x y
+[Python](https://www.python.org/downloads/) 3.10 o posterior (el instalador normal ya incluye lo necesario).
 
-O doble clic en `run.bat`. Opciones:
+1. En esta página, botón "Code" y luego "Download ZIP". Descomprímelo.
+2. Doble clic en `run.bat`.
 
-| Opción | Efecto |
-|---|---|
-| `--lang es\|en` | Idioma de la interfaz. Por defecto, el último usado. |
-| `--config-dir RUTA` | Carpeta de configuración de OTD (la que tiene `settings.json`). |
-| `--install-dir RUTA` | Carpeta del programa de OTD (la que tiene `OpenTabletDriver.Daemon.exe`). |
-| `--dry-run` | No aplica nada a OTD. Solo permite guardar el archivo y el informe. |
+Si quieres mirar sin tocar nada, abre una consola en esa carpeta y escribe
+`py -3 -m osu_tablet_assistant --dry-run`: así no se aplica nada a OpenTabletDriver.
 
-Para un ejecutable sin Python: `powershell -ExecutionPolicy Bypass -File build_exe.ps1` (requiere PyInstaller). Genera `dist\Osu Open Tablet.exe`.
+Si prefieres un `.exe`, puedes compilarlo tú siguiendo [CONTRIBUTING.md](CONTRIBUTING.md#compilar-el-exe).
+Si algo falla, abre una [incidencia](https://github.com/leonardoulysses92-star/Osu-Open-Tablet/issues).
 
-## Cómo funciona
-
-1. Localiza OTD y lee tus perfiles y plugins.
-2. Eliges tableta y pantalla, y respondes unas preguntas (estilo de juego, mapas, prioridad, plugins permitidos).
-3. Mide tu punto de partida: tasa de reporte y estabilidad.
-4. Aplica cada candidata a OTD, la mide (estabilidad, seguimiento, puntería) y te dice cómo salió en palabras (Excelente, Buena, Normal o Floja); repetir una prueba la hace más fiable. Puedes refinar la mejor.
-5. Te muestra la recomendación con los motivos, las mediciones y la comparación con la comunidad. La guardas como archivo de OTD o la aplicas.
-
-El detalle de cada paso, las pruebas y dónde se guarda cada archivo está en [docs/guia.md](docs/guia.md).
-
-## Seguridad
-
-- Copia de `settings.json` en `<config>\Backup\` antes del primer cambio de cada sesión.
-- Pide confirmación antes de aplicar ajustes, restaurar o reemplazar un archivo.
-- `--dry-run` no toca OTD.
-- No cierra ni reinicia OTD, y nunca instala plugins: te dice cuál, por qué y dónde conseguirlo.
-- No activa la predicción por su cuenta. Ver [docs/filtros.md](docs/filtros.md).
-
-Para deshacer: "Restaurar mi configuración" en la app, cargar un archivo en OTD, o con OTD cerrado copiar la copia de `Backup\` encima de `settings.json`.
-
-## Estructura
-
-```
-run.bat, build_exe.ps1
-data/                    paquete de datos de la comunidad (generado)
-tools/refresh_data.py    regenera data/
-docs/                    documentación
-osu_tablet_assistant/
-  appconfig.py           ajustes del propio asistente
-  otd/                   todo lo que toca OTD
-  knowledge/             tabletas, catálogo de filtros, presets de la comunidad
-  engine/                área, recomendaciones, métricas
-  gui/                   asistente y pruebas en vivo
-  locales/{es,en}/       textos de la interfaz
-tests/                   unittest
-```
+Con interpoladores en Windows conviene OpenTabletDriver 0.6.8.1 o posterior; con versiones anteriores el
+programa avisa, pero no obliga a actualizar.
 
 ## Documentación
 
-- [Guía de uso](docs/guia.md): pasos, política de plugins, pruebas, archivos.
-- [Datos de la comunidad](docs/comunidad.md): fuentes, adaptación al área, actualización.
-- [Filtros](docs/filtros.md): catálogo y normas de osu! sobre predicción.
-- [Modo acompañante](docs/COMPANION.md) (en inglés): ajuste en vivo mientras juegas.
-- [Coach de partidas](docs/PLAY_COACH.md) (en inglés): qué ve, qué infiere y sus límites.
-- [Diseño de la interfaz](docs/DESIGN.md) (en inglés): paleta, formas redondeadas y cómo ajustarlas.
-- [Arquitectura](docs/ARCHITECTURE.md) y [notas de investigación](docs/research/).
-- [Historial de versiones](CHANGELOG.md): qué trae cada versión; las anteriores son etiquetas de Git (`git tag`).
-- [Cómo colaborar](CONTRIBUTING.md): ejecutar, probar, normas del proyecto y cómo se publica una versión.
-
-## Tests
-
-```
-py -3 -m unittest discover -s tests
-```
-
-Los tests fallan si `data/` no está al día con `knowledge/`; se regenera con `python tools/refresh_data.py`.
-
-## Estado
-
-- La aplicación en vivo (Console y pipe del daemon) está escrita a partir del código de OTD y no se ha verificado con hardware real.
-- El escalado por área de los valores de la comunidad es una heurística, no una regla de los autores de los plugins.
-- La tasa de reporte de la tableta se escribe a mano. Solo se detecta el monitor principal.
-- No está resuelto si los ajustes de predicción cuentan como asistencia de entrada para osu!.
+- [Guía de uso](docs/guia.md): los pasos, las pruebas, dónde se guarda cada archivo y cómo deshacer.
+- [Datos de la comunidad](docs/comunidad.md): de dónde salen y cómo se adaptan a tu área.
+- [Filtros](docs/filtros.md): qué filtros se recomiendan y las normas de osu! sobre predicción.
+- [Coach de partidas](docs/PLAY_COACH.md) y [ajuste en vivo](docs/COMPANION.md) (en inglés).
+- [Historial de versiones](CHANGELOG.md).
+- [Cómo colaborar](CONTRIBUTING.md): código, tests y cómo compilar.
 
 ## Licencia
 

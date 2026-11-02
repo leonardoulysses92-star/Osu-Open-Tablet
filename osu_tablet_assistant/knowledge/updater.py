@@ -216,9 +216,26 @@ def load_cache(cache_dir: Path) -> Bundle | None:
         return None
 
 
-def activate_cache(cache_dir: Path) -> Bundle | None:
-    """At startup: use a valid cache if there is one (packaged data otherwise)."""
+def packaged_version() -> int:
+    """Version of the community data shipped with this copy of the program."""
+    return kpresets.parse_presets(kpresets.packaged_document()).version
+
+
+def newer_cache(cache_dir: Path) -> Bundle | None:
+    """The cached bundle only when it is valid AND newer than the packaged data.
+
+    After the program itself is updated, its packaged data can be newer than an old download; that
+    old cache must not hide it.
+    """
     bundle = load_cache(cache_dir)
+    if bundle is None or bundle.manifest.version <= packaged_version():
+        return None
+    return bundle
+
+
+def activate_cache(cache_dir: Path) -> Bundle | None:
+    """At startup: use a valid cache newer than the packaged data, else the packaged data."""
+    bundle = newer_cache(cache_dir)
     activate(bundle)
     return bundle
 
@@ -244,9 +261,8 @@ def update(base_url: str, cache_dir: Path, fetcher: Fetcher = urllib_fetch) -> U
     """Download, validate, cache and activate the bundle at ``base_url``. Never raises."""
     if not _https(base_url):
         return UpdateResult(False, "core.update.error.url", {"url": base_url})
-    current = load_cache(cache_dir)
-    packaged_version = kpresets.parse_presets(kpresets.packaged_document()).version
-    current_version = current.manifest.version if current else packaged_version
+    current = newer_cache(cache_dir)
+    current_version = current.manifest.version if current else packaged_version()
     try:
         manifest_raw = fetcher(_join(base_url, MANIFEST), MAX_MANIFEST_BYTES, TIMEOUT_S)
         manifest = parse_manifest(manifest_raw)

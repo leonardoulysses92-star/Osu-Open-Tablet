@@ -31,6 +31,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Sequence
 
+from ..log import log_exception
 from ..models import Reason
 from . import replay as replay_mod
 from .beatmap import desktop_to_playfield
@@ -456,6 +457,7 @@ def check_play(capture: PlayCapture, beatmap: Beatmap | None, *, osu_dir: str | 
         return _check_play(capture, beatmap, osu_dir, recorder_now, finder, lazer_files, cfg, stats, refresh_hz,
                            replay_path, wall_now)
     except Exception:          # a report line is never worth breaking the round
+        log_exception("checking the play against the replay")
         return PlayCheck()
 
 

@@ -9,7 +9,6 @@ needs ``confirmed=True`` and is preceded by exactly one settings backup.
 """
 from __future__ import annotations
 
-import importlib
 import math
 import re
 import sys
@@ -19,10 +18,13 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Callable
 
-from ..appconfig import AppConfig, preset_file_name
+from ..appconfig import AppConfig, preset_file_name, save_config
 from .. import profile as profile_mod
 from ..engine import areafit, judge, recommend
+from ..engine import community as community_mod
+from ..knowledge import filters, presets, updater
 from ..knowledge import tablets as tablet_db
+from ..otd import plugins, settings_io
 from ..models import (
     ApplyResult,
     Candidate,
@@ -42,6 +44,7 @@ from ..models import (
     TabletSpec,
     UserPreferences,
 )
+from . import live_tests
 from .i18n import t
 
 BASELINE_KINDS = ("rate", "stillness")
@@ -54,11 +57,6 @@ GOALS = ("guided", "live", "coach")
 # Steps shared by the live and coach goals (they need OTD, tablet and display, then open their tool).
 SETUP_STEPS = ("welcome", "detect", "tablet", "display")
 
-_SETTINGS_IO = "osu_tablet_assistant.otd.settings_io"
-_PLUGINS = "osu_tablet_assistant.otd.plugins"
-_RECOMMEND = "osu_tablet_assistant.engine.recommend"
-_COMMUNITY = "osu_tablet_assistant.engine.community"
-_UPDATER = "osu_tablet_assistant.knowledge.updater"
 SAVED_CANDIDATES = 2         # the player's own last saved settings offered as options (when they still fit)
 COMMUNITY_CANDIDATES = 3     # closest community presets measured per run (plus the chosen start)
 
@@ -93,14 +91,6 @@ class ConfirmationRequired(SessionError):
 
     def __init__(self) -> None:
         super().__init__("core.error.not_confirmed")
-
-
-def _lazy(module: str, attr: str) -> Callable[..., Any]:
-    """Callable that imports ``module.attr`` on first use (modules may not exist yet)."""
-    def call(*args: Any, **kwargs: Any) -> Any:
-        return getattr(importlib.import_module(module), attr)(*args, **kwargs)
-    call.__name__ = attr
-    return call
 
 
 def display_from_tk(widget: Any) -> DisplaySpec:
@@ -148,40 +138,37 @@ def _default_controller(install_dir: Path | None, config_dir: Path | None) -> An
 
 @dataclass
 class Services:
-    """Everything the session calls out to; defaults import the real modules lazily."""
-    # osu_tablet_assistant.otd.settings_io
-    find_config_dir: Callable[[], Path | None] = _lazy(_SETTINGS_IO, "find_config_dir")
-    find_install_dir: Callable[[], Path | None] = _lazy(_SETTINGS_IO, "find_install_dir")
-    load_settings: Callable[[Path], dict] = _lazy(_SETTINGS_IO, "load_settings")
-    list_profiles: Callable[[dict], list[ProfileInfo]] = _lazy(_SETTINGS_IO, "list_profiles")
-    apply_changes: Callable[..., dict] = _lazy(_SETTINGS_IO, "apply_changes")
-    backup_settings: Callable[[Path], Path] = _lazy(_SETTINGS_IO, "backup_settings")
-    save_preset: Callable[[Path, str, dict], Path] = _lazy(_SETTINGS_IO, "save_preset")
-    write_settings: Callable[[Path, dict], None] = _lazy(_SETTINGS_IO, "write_settings")
-    # osu_tablet_assistant.otd.plugins / controller
-    list_installed_plugins: Callable[[Path], list[PluginInfo]] = _lazy(
-        _PLUGINS, "list_installed_plugins")
-    available_filter_paths: Callable[[Path], set[str]] = _lazy(_PLUGINS, "available_filter_paths")
+    """Everything the session calls out to (tests replace these with fakes)."""
+    # otd.settings_io
+    find_config_dir: Callable[[], Path | None] = settings_io.find_config_dir
+    find_install_dir: Callable[[], Path | None] = settings_io.find_install_dir
+    load_settings: Callable[[Path], dict] = settings_io.load_settings
+    list_profiles: Callable[[dict], list[ProfileInfo]] = settings_io.list_profiles
+    apply_changes: Callable[..., dict] = settings_io.apply_changes
+    backup_settings: Callable[[Path], Path] = settings_io.backup_settings
+    save_preset: Callable[[Path, str, dict], Path] = settings_io.save_preset
+    write_settings: Callable[[Path, dict], None] = settings_io.write_settings
+    # otd.plugins / controller
+    list_installed_plugins: Callable[[Path], list[PluginInfo]] = plugins.list_installed_plugins
+    available_filter_paths: Callable[[Path], set[str]] = plugins.available_filter_paths
     make_controller: Callable[[Path | None, Path | None], Any] = _default_controller
-    # osu_tablet_assistant.engine.recommend / knowledge.filters
-    generate_candidates: Callable[..., list[Candidate]] = _lazy(_RECOMMEND, "generate_candidates")
-    rank: Callable[..., list[CandidateResult]] = _lazy(_RECOMMEND, "rank")
-    refine: Callable[..., Candidate | None] = _lazy(_RECOMMEND, "refine")
-    load_filter_catalog: Callable[[], dict[str, Any]] = _lazy(
-        "osu_tablet_assistant.knowledge.filters", "load_catalog")
+    # engine.recommend / knowledge.filters
+    generate_candidates: Callable[..., list[Candidate]] = recommend.generate_candidates
+    rank: Callable[..., list[CandidateResult]] = recommend.rank
+    refine: Callable[..., Candidate | None] = recommend.refine
+    load_filter_catalog: Callable[[], dict[str, Any]] = filters.load_catalog
     # community presets (knowledge.presets / engine.community), OTD locations, app config
-    load_community_presets: Callable[[], Any] = _lazy(
-        "osu_tablet_assistant.knowledge.presets", "load_presets")
-    community: Callable[[], Any] = lambda: importlib.import_module(_COMMUNITY)
-    config_locations: Callable[..., list[Any]] = _lazy(_SETTINGS_IO, "config_locations")
-    version_notice: Callable[[dict], Any] = _lazy(_SETTINGS_IO, "version_notice")
-    save_app_config: Callable[..., Path] = _lazy("osu_tablet_assistant.appconfig", "save_config")
+    load_community_presets: Callable[[], Any] = presets.load_presets
+    community: Callable[[], Any] = lambda: community_mod
+    config_locations: Callable[..., list[Any]] = settings_io.config_locations
+    version_notice: Callable[[dict], Any] = settings_io.version_notice
+    save_app_config: Callable[..., Path] = save_config
     # knowledge.updater (community data freshness; network only when the user asks)
-    update_community_data: Callable[..., Any] = _lazy(_UPDATER, "update")
-    community_data_status: Callable[..., dict[str, Any]] = _lazy(_UPDATER, "status")
-    activate_data_cache: Callable[[Path], Any] = _lazy(_UPDATER, "activate_cache")
-    # osu_tablet_assistant.gui.live_tests
-    run_test: Callable[..., None] = _lazy("osu_tablet_assistant.gui.live_tests", "run_test")
+    update_community_data: Callable[..., Any] = updater.update
+    community_data_status: Callable[..., dict[str, Any]] = updater.status
+    activate_data_cache: Callable[[Path], Any] = updater.activate_cache
+    # gui.live_tests
+    run_test: Callable[..., None] = live_tests.run_test
     # this package
     list_known_tablets: Callable[[Path | None], list[TabletSpec]] = tablet_db.list_known_tablets
     detect_display: Callable[[], DisplaySpec | None] = detect_display_tk

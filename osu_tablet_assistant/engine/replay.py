@@ -28,6 +28,7 @@ MOD_EASY, MOD_HARD_ROCK, MOD_DOUBLE_TIME, MOD_HALF_TIME, MOD_NIGHTCORE = 2, 16, 
 KEY_BITS = ((1, "mouse1"), (2, "mouse2"), (4, "k1"), (8, "k2"))   # M1, M2, K1, K2 (smoke, bit 16, is ignored)
 MAX_FILE_BYTES = 40 * 1024 * 1024      # a replay is a few hundred KB; refuse absurd files
 MAX_FRAMES = 2_000_000
+MAX_FRAME_TEXT_BYTES = 64 * 1024 * 1024   # the unpacked frame text; a long play is a few MB
 
 
 @dataclass(frozen=True)
@@ -102,9 +103,22 @@ class _Reader:
         return self.take(length).decode("utf-8", errors="replace")
 
 
-def _frames(raw: bytes) -> tuple[ReplayFrame, ...]:
+def _unpack(raw: bytes, limit: int | None = None) -> bytes:
+    """Decompress the frame data, refusing (ValueError) anything that unpacks to more than ``limit`` bytes
+    (default :data:`MAX_FRAME_TEXT_BYTES`)."""
+    limit = MAX_FRAME_TEXT_BYTES if limit is None else limit
     # The stream is the legacy "LZMA alone" layout (properties + 8-byte size); FORMAT_AUTO reads it.
-    text = lzma.decompress(raw).decode("ascii", errors="ignore")
+    unpacker = lzma.LZMADecompressor()
+    out = unpacker.decompress(raw, max_length=limit + 1)
+    if len(out) > limit:
+        raise ValueError("replay frame data is too large")
+    if not unpacker.eof:
+        raise ValueError("replay frame data ends early")
+    return out
+
+
+def _frames(raw: bytes) -> tuple[ReplayFrame, ...]:
+    text = _unpack(raw).decode("ascii", errors="ignore")
     frames, t = [], 0.0
     for chunk in text.split(","):
         parts = chunk.split("|")

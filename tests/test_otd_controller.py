@@ -84,6 +84,12 @@ class FramingTest(unittest.TestCase):
             with self.subTest(data=data[:30]), self.assertRaises(ctl.RpcError):
                 ctl.read_message(io.BytesIO(data))
 
+    def test_absurd_length_is_refused_before_reading(self) -> None:
+        stream = io.BytesIO(f"Content-Length: {ctl.MAX_MESSAGE_BYTES + 1}\r\n\r\n".encode("ascii") + b"{}")
+        with self.assertRaisesRegex(ctl.RpcError, "too large"):
+            ctl.read_message(stream)
+        self.assertEqual(stream.read(), b"{}")          # the body was never read
+
     def test_rpc_call_skips_notifications(self) -> None:
         pipe = FakePipe(notification("Message") + response(None, 99) + notification("Resynchronize") + response(5))
         self.assertEqual(ctl.rpc_call(pipe, "SetSettings", [SETTINGS]), 5)

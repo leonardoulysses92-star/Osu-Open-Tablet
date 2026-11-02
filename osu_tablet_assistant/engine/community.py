@@ -37,8 +37,6 @@ from ..models import (Candidate, FilterConfig, PluginPolicy, ProfileChanges, Pro
                       TabletSpec)
 from . import recommend as rec
 
-MIXMG_OUTER_PER_WIDTH = 0.00894     # Mixmg calculator, measured by the research on five areas
-MIXMG_INNER_PER_HEIGHT = 0.0065
 SIMILAR_AREA = 0.05                 # within 5 %: keep the published values
 DEFAULT_LIMIT = 3                   # community candidates generated per run
 # Properties expressed in screen pixels or raw tablet units: never scaled.
@@ -325,15 +323,6 @@ def community_candidate(preset: CommunityPreset, base: ProfileChanges, catalog: 
         changes=ProfileChanges(base.tablet_area, base.display_area, base.lock_aspect_ratio, filters),
         reasons=tuple(head + reasons + [Reason("engine.reason.latency_estimate", {"ms": latency})]),
         est_added_latency_ms=latency, tags=("community", f"confidence-{preset.confidence}"))
-
-
-def label_params(candidate: Candidate) -> dict[str, Any]:
-    """Params for ``t(candidate.label_key, **params)`` (community candidates carry a name)."""
-    for reason in candidate.reasons:
-        if reason.key in ("engine.reason.community_source", "engine.reason.community_source_undated",
-                          "engine.reason.community_user_values"):
-            return {"name": reason.params.get("name", "")}
-    return {}
 
 
 # --------------------------------------------------------------------------

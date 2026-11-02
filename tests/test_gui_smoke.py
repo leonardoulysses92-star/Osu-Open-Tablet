@@ -6,7 +6,6 @@ controller and a fake pen, so nothing outside the temp folder is touched.
 from __future__ import annotations
 
 import time
-import tkinter as tk
 import unittest
 from tkinter import ttk
 
@@ -14,15 +13,7 @@ from osu_tablet_assistant.gui import i18n, wizard
 from osu_tablet_assistant.gui.app import App
 from osu_tablet_assistant.gui.session import CANDIDATE_KINDS, STEP_ORDER, Step
 from test_integration import Harness
-
-
-def _display_available() -> bool:
-    try:
-        root = tk.Tk()
-    except tk.TclError:
-        return False
-    root.destroy()
-    return True
+from support import display_available
 
 
 class _Preset:
@@ -30,7 +21,7 @@ class _Preset:
         self.id, self.label, self.summary = pid, label, "summary"
 
 
-@unittest.skipUnless(_display_available(), "no display")
+@unittest.skipUnless(display_available(), "no display")
 class GuiSmokeTests(unittest.TestCase):
     def setUp(self) -> None:
         self.addCleanup(i18n.set_language, "es")
